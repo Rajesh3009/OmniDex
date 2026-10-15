@@ -1,0 +1,4 @@
+.torrent.bolt.db
+indexer.db
+indexer.db-shm
+indexer.db-wal
