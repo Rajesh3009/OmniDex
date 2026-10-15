@@ -229,8 +229,9 @@ function formatBytes(bytes) {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return 'N/A';
+  if (!dateStr || dateStr.startsWith('0001-01-01')) return 'Recently';
   const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return 'Recently';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 

@@ -2,6 +2,7 @@ package dhtcrawler
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/anacrolix/dht/v2"
+	"github.com/anacrolix/dht/v2/int160"
+	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 
@@ -104,6 +107,26 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 
 	dhtCfg := dht.NewDefaultServerConfig()
 	dhtCfg.Conn = conn
+	dhtCfg.Passive = false
+	dhtCfg.NoSecurity = true // accept from all public nodes
+
+	dhtCfg.OnQuery = func(query *krpc.Msg, source net.Addr) bool {
+		if query.A != nil {
+			// If a node asks get_peers for an info_hash, intercept it immediately
+			if query.Q == "get_peers" && query.A.InfoHash != [20]byte{} {
+				atomic.AddInt64(&c.metrics.AnnouncesReceived, 1)
+				var ip net.IP
+				var port int
+				if udpAddr, ok := source.(*net.UDPAddr); ok {
+					ip = udpAddr.IP
+					port = udpAddr.Port
+				}
+				c.enqueue(metainfo.Hash(query.A.InfoHash), ip, port)
+			}
+		}
+		return true // allow normal DHT handling so other nodes keep communicating with us
+	}
+
 	dhtCfg.OnAnnouncePeer = func(infoHash metainfo.Hash, ip net.IP, port int, portOk bool) {
 		atomic.AddInt64(&c.metrics.AnnouncesReceived, 1)
 		c.enqueue(infoHash, ip, port)
@@ -132,6 +155,35 @@ func (c *Crawler) Start() {
 			log.Printf("[DHT Crawler] Bootstrap note: %v", err)
 		} else {
 			log.Printf("[DHT Crawler] Bootstrap complete. Responses received: %d", stats.NumResponses)
+		}
+	}()
+
+	// Continuous random walk traversal to keep our node active in everyone's routing table
+	go func() {
+		// Wait a bit for initial bootstrap
+		time.Sleep(5 * time.Second)
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-ticker.C:
+				nodes := c.dhtServer.Nodes()
+				if len(nodes) == 0 {
+					_, _ = c.dhtServer.Bootstrap()
+					continue
+				}
+				// Query a random target to stimulate DHT find_node and get_peers traffic
+				var randTarget [20]byte
+				_, _ = rand.Read(randTarget[:])
+				for i := 0; i < len(nodes) && i < 8; i++ {
+					targetID := int160.FromByteArray(randTarget)
+					addr := dht.NewAddr(nodes[i].Addr.UDP())
+					c.dhtServer.FindNode(addr, targetID, dht.QueryRateLimiting{NotAny: true})
+				}
+			}
 		}
 	}()
 
