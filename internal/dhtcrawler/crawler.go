@@ -17,6 +17,7 @@ import (
 	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage/disabled"
 
 	"local-indexer/internal/db"
 )
@@ -105,7 +106,7 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 	tcfg.NoDHT = true // We run our own KRPC listener for passive crawling
 	tcfg.DisableAcceptRateLimiting = true
 	tcfg.EstablishedConnsPerTorrent = cfg.MaxTorrentPeers
-	tcfg.DataDir = "" // memory/noop - we only fetch metadata, no payload pieces
+	tcfg.DefaultStorage = disabled.Client{} // Purely memory-based no-op metadata crawler; no disk writes or dummy files
 
 	cl, err := torrent.NewClient(tcfg)
 	if err != nil {

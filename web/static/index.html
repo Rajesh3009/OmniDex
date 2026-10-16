@@ -80,10 +80,97 @@
       </div>
     </section>
 
+    <!-- Filter & Sorting Toolbar -->
+    <section class="filter-sort-bar">
+      <!-- Category Filter Pills -->
+      <div class="category-pills-wrap">
+        <div class="category-pills" id="category-pills">
+          <button class="pill-btn active" data-category="all">
+            <span class="pill-dot" style="background: var(--accent-cyan)"></span>
+            <span>All Categories</span>
+          </button>
+          <button class="pill-btn" data-category="Video">
+            <span class="pill-dot" style="background: #a855f7"></span>
+            <span>Video</span>
+          </button>
+          <button class="pill-btn" data-category="Audio">
+            <span class="pill-dot" style="background: #ec4899"></span>
+            <span>Audio</span>
+          </button>
+          <button class="pill-btn" data-category="Software">
+            <span class="pill-dot" style="background: #eab308"></span>
+            <span>Software</span>
+          </button>
+          <button class="pill-btn" data-category="Books">
+            <span class="pill-dot" style="background: #10b981"></span>
+            <span>Books</span>
+          </button>
+          <button class="pill-btn" data-category="Other">
+            <span class="pill-dot" style="background: #94a3b8"></span>
+            <span>Other</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Secondary Filters & Sort Controls -->
+      <div class="controls-bar">
+        <div class="control-group">
+          <!-- Source Selector -->
+          <div class="control-box">
+            <span class="control-icon">📡</span>
+            <label for="filter-source" class="control-label">Source:</label>
+            <select id="filter-source" class="custom-select">
+              <option value="all">All Sources</option>
+              <option value="dht">DHT Wire Only</option>
+              <option value="prowlarr">Prowlarr Only</option>
+            </select>
+          </div>
+
+          <!-- Size Range Selector -->
+          <div class="control-box">
+            <span class="control-icon">💾</span>
+            <label for="filter-size" class="control-label">Size:</label>
+            <select id="filter-size" class="custom-select">
+              <option value="all">Any Size</option>
+              <option value="tiny">&lt; 500 MB</option>
+              <option value="small">500 MB – 2 GB</option>
+              <option value="medium">2 GB – 10 GB</option>
+              <option value="large">&gt; 10 GB</option>
+            </select>
+          </div>
+
+          <!-- Sort Selector -->
+          <div class="control-box">
+            <span class="control-icon">↕️</span>
+            <label for="sort-select" class="control-label">Sort:</label>
+            <select id="sort-select" class="custom-select">
+              <option value="created_desc">⚡ Newest Added</option>
+              <option value="created_asc">🕒 Oldest Added</option>
+              <option value="size_desc">📈 Size: Large → Small</option>
+              <option value="size_asc">📉 Size: Small → Large</option>
+              <option value="name_asc">🔤 Title: A → Z</option>
+              <option value="name_desc">🔡 Title: Z → A</option>
+              <option value="seeders_desc">👥 Most Seeders</option>
+              <option value="relevance">🎯 Best Match (FTS5)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filter-actions">
+          <button id="btn-reset-filters" class="btn btn-ghost" title="Reset all filters and sorting">
+            <span>↺</span> Reset Filters
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Results Section -->
     <main>
       <div class="results-header">
-        <span class="results-count" id="results-count-text">Showing recent torrents</span>
+        <div class="results-summary">
+          <span class="results-count" id="results-count-text">Showing recent torrents</span>
+          <div id="active-filter-badges" class="active-filter-badges"></div>
+        </div>
         <div id="loading-spinner" style="display:none; color: var(--accent-cyan); font-size:0.85rem;">Searching...</div>
       </div>
 
@@ -91,13 +178,38 @@
         <table class="torrent-table">
           <thead>
             <tr>
-              <th style="width: 48%">Title & InfoHash</th>
-              <th>Category</th>
-              <th>Size</th>
-              <th>Files</th>
-              <th>Source</th>
-              <th>Date</th>
-              <th style="text-align: right">Actions</th>
+              <th class="th-sortable" data-sort-key="name" style="width: 44%">
+                <div class="th-inner">
+                  <span>Title & InfoHash</span>
+                  <span class="sort-indicator" id="sort-icon-name">↕</span>
+                </div>
+              </th>
+              <th class="th-sortable" data-sort-key="category" style="width: 12%">
+                <div class="th-inner">
+                  <span>Category</span>
+                  <span class="sort-indicator" id="sort-icon-category">↕</span>
+                </div>
+              </th>
+              <th class="th-sortable" data-sort-key="size" style="width: 12%">
+                <div class="th-inner">
+                  <span>Size</span>
+                  <span class="sort-indicator" id="sort-icon-size">↕</span>
+                </div>
+              </th>
+              <th style="width: 8%">Files</th>
+              <th class="th-sortable" data-sort-key="source" style="width: 10%">
+                <div class="th-inner">
+                  <span>Source</span>
+                  <span class="sort-indicator" id="sort-icon-source">↕</span>
+                </div>
+              </th>
+              <th class="th-sortable" data-sort-key="created" style="width: 14%">
+                <div class="th-inner">
+                  <span>Date</span>
+                  <span class="sort-indicator active" id="sort-icon-created">▼</span>
+                </div>
+              </th>
+              <th style="text-align: right; width: 10%">Actions</th>
             </tr>
           </thead>
           <tbody id="torrents-tbody">

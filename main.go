@@ -84,6 +84,7 @@ func main() {
 	// REST APIs for UI
 	mux.HandleFunc("/api/v1/search", srv.handleSearch)
 	mux.HandleFunc("/api/v1/stats", srv.handleStats)
+	mux.HandleFunc("/api/v1/categories", srv.handleCategories)
 	mux.HandleFunc("/api/v1/dht/graph", srv.handleDHTGraph)
 	mux.HandleFunc("/api/v1/config", srv.handleConfig)
 
@@ -138,6 +139,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	queryProwlarr := r.URL.Query().Get("prowlarr") == "true"
 
+	category := r.URL.Query().Get("category")
+	source := r.URL.Query().Get("source")
+	sortBy := r.URL.Query().Get("sort")
+	if sortBy == "" {
+		sortBy = r.URL.Query().Get("sort_by")
+	}
+	minSize, _ := strconv.ParseInt(r.URL.Query().Get("min_size"), 10, 64)
+	maxSize, _ := strconv.ParseInt(r.URL.Query().Get("max_size"), 10, 64)
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -155,7 +165,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, total, err := s.store.Search(q, limit, offset)
+	filter := db.SearchFilter{
+		Query:    q,
+		Category: category,
+		Source:   source,
+		MinSize:  minSize,
+		MaxSize:  maxSize,
+		SortBy:   sortBy,
+		Limit:    limit,
+		Offset:   offset,
+	}
+
+	results, total, err := s.store.SearchWithFilter(filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -167,6 +188,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
+	cats, err := s.store.GetCategories()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(cats)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

@@ -1,11 +1,23 @@
 // Local Torrent Indexer frontend application
 let currentTorrents = [];
 
+const filterState = {
+  query: '',
+  category: 'all',
+  source: 'all',
+  sizePreset: 'all',
+  minSize: 0,
+  maxSize: 0,
+  sort: 'created_desc',
+  limit: 50,
+  offset: 0
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
   loadStats();
   loadConfig();
-  performSearch('');
+  performSearch();
 
   // Auto-refresh metrics every 3 seconds
   setInterval(loadStats, 3000);
@@ -16,14 +28,68 @@ function initEventListeners() {
   const btnSearch = document.getElementById('btn-search');
 
   btnSearch.addEventListener('click', () => {
-    performSearch(searchInput.value);
+    filterState.query = searchInput.value;
+    performSearch();
   });
 
   searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      performSearch(searchInput.value);
+      filterState.query = searchInput.value;
+      performSearch();
     }
   });
+
+  // Category filter pills
+  document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const category = btn.getAttribute('data-category');
+      setCategoryFilter(category);
+    });
+  });
+
+  // Source selector
+  const sourceSelect = document.getElementById('filter-source');
+  if (sourceSelect) {
+    sourceSelect.addEventListener('change', () => {
+      filterState.source = sourceSelect.value;
+      performSearch();
+    });
+  }
+
+  // Size range selector
+  const sizeSelect = document.getElementById('filter-size');
+  if (sizeSelect) {
+    sizeSelect.addEventListener('change', () => {
+      setSizePreset(sizeSelect.value);
+      performSearch();
+    });
+  }
+
+  // Sort selector
+  const sortSelect = document.getElementById('sort-select');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      filterState.sort = sortSelect.value;
+      updateSortIndicators();
+      performSearch();
+    });
+  }
+
+  // Table header sort clicks
+  document.querySelectorAll('.th-sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.getAttribute('data-sort-key');
+      handleHeaderSort(key);
+    });
+  });
+
+  // Reset filters button
+  const btnReset = document.getElementById('btn-reset-filters');
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      resetFilters();
+    });
+  }
 
   // Modal controls
   document.getElementById('btn-show-graph').addEventListener('click', () => {
@@ -78,89 +144,178 @@ function initEventListeners() {
   });
 }
 
-function openModal(id) {
-  document.getElementById(id).classList.add('active');
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.remove('active');
-}
-
-async function loadStats() {
-  try {
-    const res = await fetch('/api/v1/stats');
-    if (!res.ok) return;
-    const data = await res.json();
-
-    document.getElementById('stat-total-torrents').textContent = data.db.total_torrents.toLocaleString();
-    document.getElementById('stat-total-size').textContent = formatBytes(data.db.total_size_bytes) + ' cataloged';
-    document.getElementById('stat-dht-count').textContent = data.db.dht_count.toLocaleString();
-    document.getElementById('stat-dht-announces').textContent = `${data.dht.announces_received.toLocaleString()} KRPC announces`;
-    document.getElementById('stat-prowlarr-count').textContent = data.db.prowlarr_count.toLocaleString();
-    
-    const dhtNodesEl = document.getElementById('stat-dht-nodes');
-    if (dhtNodesEl) {
-      dhtNodesEl.textContent = `${data.dht.good_nodes || 0} Nodes`;
-    }
-    document.getElementById('stat-queue-len').textContent = `${data.dht.good_nodes || 0} good / ${data.dht.total_nodes || 0} total routing nodes`;
-  } catch (e) {
-    console.error('Stats error:', e);
-  }
-}
-
-async function loadConfig() {
-  try {
-    const res = await fetch('/api/v1/config');
-    if (!res.ok) return;
-    const cfg = await res.json();
-
-    document.getElementById('cfg-prowlarr-url').value = cfg.prowlarr_url || '';
-    document.getElementById('cfg-prowlarr-key').value = cfg.prowlarr_api_key || '';
-    document.getElementById('cfg-torznab-key').value = cfg.torznab_api_key || '';
-    document.getElementById('cfg-dht-workers').value = cfg.dht_workers || 15;
-
-    document.getElementById('torznab-key-display').textContent = cfg.torznab_api_key || 'N/A';
-    document.getElementById('torznab-url-display').textContent = `${window.location.origin}/api/v1/torznab`;
-  } catch (e) {
-    console.error('Config fetch error:', e);
-  }
-}
-
-async function performSearch(query) {
-  const loading = document.getElementById('loading-spinner');
-  const countText = document.getElementById('results-count-text');
-  const tbody = document.getElementById('torrents-tbody');
-  const emptyState = document.getElementById('empty-state');
-  const queryProwlarr = document.getElementById('check-prowlarr-live').checked;
-
-  loading.style.display = 'inline-block';
-
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      limit: '50',
-      prowlarr: queryProwlarr ? 'true' : 'false'
-    });
-
-    const res = await fetch(`/api/v1/search?${params.toString()}`);
-    const data = await res.json();
-
-    currentTorrents = data.items || [];
-    renderTable(currentTorrents);
-
-    if (query.trim() === '') {
-      countText.textContent = `Showing latest ${currentTorrents.length} indexed torrents (Total: ${data.total})`;
+function setCategoryFilter(category) {
+  filterState.category = category;
+  document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
+    if (btn.getAttribute('data-category') === category) {
+      btn.classList.add('active');
     } else {
-      countText.textContent = `Found ${data.total} results for "${query}"`;
+      btn.classList.remove('active');
     }
+  });
+  performSearch();
+}
 
-    emptyState.style.display = currentTorrents.length === 0 ? 'block' : 'none';
-  } catch (err) {
-    console.error('Search error:', err);
-    countText.textContent = 'Error fetching search results';
-  } finally {
-    loading.style.display = 'none';
+function setSizePreset(preset) {
+  filterState.sizePreset = preset;
+  switch (preset) {
+    case 'tiny':
+      filterState.minSize = 0;
+      filterState.maxSize = 500 * 1024 * 1024;
+      break;
+    case 'small':
+      filterState.minSize = 500 * 1024 * 1024;
+      filterState.maxSize = 2 * 1024 * 1024 * 1024;
+      break;
+    case 'medium':
+      filterState.minSize = 2 * 1024 * 1024 * 1024;
+      filterState.maxSize = 10 * 1024 * 1024 * 1024;
+      break;
+    case 'large':
+      filterState.minSize = 10 * 1024 * 1024 * 1024;
+      filterState.maxSize = 0;
+      break;
+    default:
+      filterState.minSize = 0;
+      filterState.maxSize = 0;
+      break;
   }
+}
+
+function handleHeaderSort(key) {
+  const current = filterState.sort;
+  if (key === 'created') {
+    filterState.sort = current === 'created_desc' ? 'created_asc' : 'created_desc';
+  } else if (key === 'size') {
+    filterState.sort = current === 'size_desc' ? 'size_asc' : 'size_desc';
+  } else if (key === 'name') {
+    filterState.sort = current === 'name_asc' ? 'name_desc' : 'name_asc';
+  } else if (key === 'category') {
+    filterState.sort = current === 'name_asc' ? 'name_desc' : 'name_asc';
+  } else if (key === 'source') {
+    filterState.sort = current === 'seeders_desc' ? 'created_desc' : 'seeders_desc';
+  }
+  updateSortIndicators();
+  performSearch();
+}
+
+function updateSortIndicators() {
+  const sort = filterState.sort;
+  const sortSelect = document.getElementById('sort-select');
+  if (sortSelect && sortSelect.value !== sort) {
+    sortSelect.value = sort;
+  }
+
+  const icons = {
+    name: document.getElementById('sort-icon-name'),
+    category: document.getElementById('sort-icon-category'),
+    size: document.getElementById('sort-icon-size'),
+    source: document.getElementById('sort-icon-source'),
+    created: document.getElementById('sort-icon-created'),
+  };
+
+  Object.keys(icons).forEach(k => {
+    const icon = icons[k];
+    if (!icon) return;
+    icon.classList.remove('active');
+    icon.textContent = '↕';
+  });
+
+  if (sort === 'created_desc' && icons.created) {
+    icons.created.classList.add('active');
+    icons.created.textContent = '▼';
+  } else if (sort === 'created_asc' && icons.created) {
+    icons.created.classList.add('active');
+    icons.created.textContent = '▲';
+  } else if (sort === 'size_desc' && icons.size) {
+    icons.size.classList.add('active');
+    icons.size.textContent = '▼';
+  } else if (sort === 'size_asc' && icons.size) {
+    icons.size.classList.add('active');
+    icons.size.textContent = '▲';
+  } else if (sort === 'name_asc' && icons.name) {
+    icons.name.classList.add('active');
+    icons.name.textContent = '▲';
+  } else if (sort === 'name_desc' && icons.name) {
+    icons.name.classList.add('active');
+    icons.name.textContent = '▼';
+  }
+}
+
+function resetFilters() {
+  filterState.query = '';
+  filterState.category = 'all';
+  filterState.source = 'all';
+  filterState.sort = 'created_desc';
+  setSizePreset('all');
+
+  document.getElementById('search-input').value = '';
+  const filterSource = document.getElementById('filter-source');
+  if (filterSource) filterSource.value = 'all';
+  const filterSize = document.getElementById('filter-size');
+  if (filterSize) filterSize.value = 'all';
+  const sortSelect = document.getElementById('sort-select');
+  if (sortSelect) sortSelect.value = 'created_desc';
+
+  document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-category') === 'all');
+  });
+
+  updateSortIndicators();
+  performSearch();
+}
+
+function renderActiveFilterBadges() {
+  const container = document.getElementById('active-filter-badges');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (filterState.query.trim()) {
+    createBadge(container, `Search: "${filterState.query.trim()}"`, () => {
+      document.getElementById('search-input').value = '';
+      filterState.query = '';
+      performSearch();
+    });
+  }
+
+  if (filterState.category !== 'all') {
+    createBadge(container, `Category: ${filterState.category}`, () => {
+      setCategoryFilter('all');
+    });
+  }
+
+  if (filterState.source !== 'all') {
+    createBadge(container, `Source: ${filterState.source === 'dht' ? 'DHT Wire' : 'Prowlarr'}`, () => {
+      document.getElementById('filter-source').value = 'all';
+      filterState.source = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.sizePreset !== 'all') {
+    const labels = {
+      tiny: '< 500 MB',
+      small: '500 MB – 2 GB',
+      medium: '2 GB – 10 GB',
+      large: '> 10 GB'
+    };
+    createBadge(container, `Size: ${labels[filterState.sizePreset] || filterState.sizePreset}`, () => {
+      document.getElementById('filter-size').value = 'all';
+      setSizePreset('all');
+      performSearch();
+    });
+  }
+}
+
+function createBadge(container, labelText, onRemove) {
+  const badge = document.createElement('span');
+  badge.className = 'active-filter-badge';
+  badge.innerHTML = `<span>${escapeHtml(labelText)}</span><button title="Remove filter">&times;</button>`;
+  badge.querySelector('button').addEventListener('click', (e) => {
+    e.stopPropagation();
+    onRemove();
+  });
+  container.appendChild(badge);
 }
 
 function renderTable(items) {
@@ -177,12 +332,35 @@ function renderTable(items) {
 
     const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
 
+    const cat = item.category || 'Other';
+    let catColor = '#94a3b8';
+    let catBg = 'rgba(148, 163, 184, 0.15)';
+    let catBorder = 'rgba(148, 163, 184, 0.3)';
+    if (cat === 'Video') {
+      catColor = '#c084fc';
+      catBg = 'rgba(168, 85, 247, 0.15)';
+      catBorder = 'rgba(168, 85, 247, 0.3)';
+    } else if (cat === 'Audio') {
+      catColor = '#f472b6';
+      catBg = 'rgba(236, 72, 153, 0.15)';
+      catBorder = 'rgba(236, 72, 153, 0.3)';
+    } else if (cat === 'Software') {
+      catColor = '#facc15';
+      catBg = 'rgba(234, 179, 8, 0.15)';
+      catBorder = 'rgba(234, 179, 8, 0.3)';
+    } else if (cat === 'Books') {
+      catColor = '#34d399';
+      catBg = 'rgba(16, 185, 129, 0.15)';
+      catBorder = 'rgba(16, 185, 129, 0.3)';
+    }
+    const catBadge = `<span class="badge" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" onclick="event.stopPropagation(); setCategoryFilter('${escapeHtml(cat)}')" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
+
     tr.innerHTML = `
       <td class="torrent-title-cell">
         <a href="javascript:void(0)" class="torrent-title" onclick="showDetails(${index})">${escapeHtml(item.name)}</a>
         <div class="torrent-hash">${item.info_hash}</div>
       </td>
-      <td><span class="badge badge-category">${item.category || 'Other'}</span></td>
+      <td>${catBadge}</td>
       <td>${formatBytes(item.size)}</td>
       <td>${item.file_count || 1}</td>
       <td>${sourceBadge}</td>

@@ -31,6 +31,17 @@ type Stats struct {
 	TotalSizeBytes int64 `json:"total_size_bytes"`
 }
 
+type SearchFilter struct {
+	Query    string `json:"query"`
+	Category string `json:"category"`
+	Source   string `json:"source"`
+	MinSize  int64  `json:"min_size"`
+	MaxSize  int64  `json:"max_size"`
+	SortBy   string `json:"sort_by"`
+	Limit    int    `json:"limit"`
+	Offset   int    `json:"offset"`
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -152,34 +163,120 @@ func (s *Store) Exists(infoHash string) (bool, error) {
 	return count > 0, err
 }
 
-func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, int64, error) {
-	if limit <= 0 {
-		limit = 50
+func parseDBTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
 	}
-	if limit > 200 {
-		limit = 200
+	formats := []string{
+		"2006-01-02 15:04:05",
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
 	}
-	if offset < 0 {
-		offset = 0
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func buildOrderBy(sortBy string, hasFTS bool) string {
+	prefix := ""
+	if hasFTS {
+		prefix = "t."
+	}
+	switch strings.ToLower(sortBy) {
+	case "created_asc":
+		return prefix + "created_time ASC"
+	case "created_desc":
+		return prefix + "created_time DESC"
+	case "size_asc":
+		return prefix + "size ASC, " + prefix + "created_time DESC"
+	case "size_desc":
+		return prefix + "size DESC, " + prefix + "created_time DESC"
+	case "name_asc":
+		return prefix + "name COLLATE NOCASE ASC"
+	case "name_desc":
+		return prefix + "name COLLATE NOCASE DESC"
+	case "seeders_desc":
+		return prefix + "seeders DESC, " + prefix + "created_time DESC"
+	case "seeders_asc":
+		return prefix + "seeders ASC, " + prefix + "created_time DESC"
+	case "relevance":
+		if hasFTS {
+			return "bm25(torrents_fts), t.created_time DESC"
+		}
+		return prefix + "created_time DESC"
+	default:
+		if hasFTS {
+			return "bm25(torrents_fts), t.created_time DESC"
+		}
+		return prefix + "created_time DESC"
+	}
+}
+
+func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
 	}
 
-	trimmed := strings.TrimSpace(query)
+	trimmed := strings.TrimSpace(filter.Query)
 	var records []TorrentRecord
 	var total int64
 
+	// Build common filter conditions
+	var whereClauses []string
+	var args []any
+
+	if filter.Category != "" && !strings.EqualFold(filter.Category, "all") {
+		whereClauses = append(whereClauses, "category = ?")
+		args = append(args, filter.Category)
+	}
+	if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
+		whereClauses = append(whereClauses, "source = ?")
+		args = append(args, strings.ToLower(filter.Source))
+	}
+	if filter.MinSize > 0 {
+		whereClauses = append(whereClauses, "size >= ?")
+		args = append(args, filter.MinSize)
+	}
+	if filter.MaxSize > 0 {
+		whereClauses = append(whereClauses, "size <= ?")
+		args = append(args, filter.MaxSize)
+	}
+
 	if trimmed == "" {
-		// Return recent
-		err := s.db.QueryRow("SELECT COUNT(1) FROM torrents").Scan(&total)
+		whereSQL := ""
+		if len(whereClauses) > 0 {
+			whereSQL = " WHERE " + strings.Join(whereClauses, " AND ")
+		}
+
+		countQuery := "SELECT COUNT(1) FROM torrents" + whereSQL
+		err := s.db.QueryRow(countQuery, args...).Scan(&total)
 		if err != nil {
 			return nil, 0, err
 		}
 
-		rows, err := s.db.Query(`
+		orderBy := buildOrderBy(filter.SortBy, false)
+		querySQL := fmt.Sprintf(`
 			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri
 			FROM torrents
-			ORDER BY created_time DESC
+			%s
+			ORDER BY %s
 			LIMIT ? OFFSET ?
-		`, limit, offset)
+		`, whereSQL, orderBy)
+
+		queryArgs := append(args, filter.Limit, filter.Offset)
+		rows, err := s.db.Query(querySQL, queryArgs...)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -191,7 +288,7 @@ func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, in
 			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
 				return nil, 0, err
 			}
-			r.CreatedTime, _ = time.Parse("2006-01-02 15:04:05", createdStr)
+			r.CreatedTime = parseDBTime(createdStr)
 			records = append(records, r)
 		}
 		return records, total, nil
@@ -201,7 +298,6 @@ func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, in
 	words := strings.Fields(trimmed)
 	var ftsTokens []string
 	for _, w := range words {
-		// Escape double quotes and special SQLite FTS chars
 		cleaned := strings.Map(func(r rune) rune {
 			if strings.ContainsRune(`"*()^:`, r) {
 				return -1
@@ -217,49 +313,100 @@ func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, in
 		ftsExpr = `"` + trimmed + `"*`
 	}
 
+	ftsWhereClauses := []string{"torrents_fts MATCH ?"}
+	ftsArgs := []any{ftsExpr}
+
+	if filter.Category != "" && !strings.EqualFold(filter.Category, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.category = ?")
+		ftsArgs = append(ftsArgs, filter.Category)
+	}
+	if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.source = ?")
+		ftsArgs = append(ftsArgs, strings.ToLower(filter.Source))
+	}
+	if filter.MinSize > 0 {
+		ftsWhereClauses = append(ftsWhereClauses, "t.size >= ?")
+		ftsArgs = append(ftsArgs, filter.MinSize)
+	}
+	if filter.MaxSize > 0 {
+		ftsWhereClauses = append(ftsWhereClauses, "t.size <= ?")
+		ftsArgs = append(ftsArgs, filter.MaxSize)
+	}
+
+	ftsWhereSQL := " WHERE " + strings.Join(ftsWhereClauses, " AND ")
 	countQuery := `
 		SELECT COUNT(1)
 		FROM torrents_fts f
 		JOIN torrents t ON t.rowid = f.rowid
-		WHERE torrents_fts MATCH ?
-	`
-	err := s.db.QueryRow(countQuery, ftsExpr).Scan(&total)
+	` + ftsWhereSQL
+
+	err := s.db.QueryRow(countQuery, ftsArgs...).Scan(&total)
 	if err != nil {
 		// Fallback to LIKE if FTS fails or syntax error
 		likePattern := "%" + trimmed + "%"
-		_ = s.db.QueryRow("SELECT COUNT(1) FROM torrents WHERE name LIKE ? OR info_hash LIKE ?", likePattern, likePattern).Scan(&total)
-		rows, err2 := s.db.Query(`
+		fallbackWhere := []string{"(name LIKE ? OR info_hash LIKE ?)"}
+		fallbackArgs := []any{likePattern, likePattern}
+
+		if filter.Category != "" && !strings.EqualFold(filter.Category, "all") {
+			fallbackWhere = append(fallbackWhere, "category = ?")
+			fallbackArgs = append(fallbackArgs, filter.Category)
+		}
+		if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
+			fallbackWhere = append(fallbackWhere, "source = ?")
+			fallbackArgs = append(fallbackArgs, strings.ToLower(filter.Source))
+		}
+		if filter.MinSize > 0 {
+			fallbackWhere = append(fallbackWhere, "size >= ?")
+			fallbackArgs = append(fallbackArgs, filter.MinSize)
+		}
+		if filter.MaxSize > 0 {
+			fallbackWhere = append(fallbackWhere, "size <= ?")
+			fallbackArgs = append(fallbackArgs, filter.MaxSize)
+		}
+
+		fbWhereSQL := " WHERE " + strings.Join(fallbackWhere, " AND ")
+		_ = s.db.QueryRow("SELECT COUNT(1) FROM torrents"+fbWhereSQL, fallbackArgs...).Scan(&total)
+
+		orderBy := buildOrderBy(filter.SortBy, false)
+		querySQL := fmt.Sprintf(`
 			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri
 			FROM torrents
-			WHERE name LIKE ? OR info_hash LIKE ?
-			ORDER BY created_time DESC
+			%s
+			ORDER BY %s
 			LIMIT ? OFFSET ?
-		`, likePattern, likePattern, limit, offset)
+		`, fbWhereSQL, orderBy)
+
+		fbArgs := append(fallbackArgs, filter.Limit, filter.Offset)
+		rows, err2 := s.db.Query(querySQL, fbArgs...)
 		if err2 != nil {
 			return nil, 0, err2
 		}
 		defer rows.Close()
+
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
 			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
 				return nil, 0, err
 			}
-			r.CreatedTime, _ = time.Parse("2006-01-02 15:04:05", createdStr)
+			r.CreatedTime = parseDBTime(createdStr)
 			records = append(records, r)
 		}
 		return records, total, nil
 	}
 
-	searchQuery := `
+	orderBy := buildOrderBy(filter.SortBy, true)
+	searchQuery := fmt.Sprintf(`
 		SELECT t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri
 		FROM torrents_fts f
 		JOIN torrents t ON t.rowid = f.rowid
-		WHERE torrents_fts MATCH ?
-		ORDER BY bm25(torrents_fts), t.created_time DESC
+		%s
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`
-	rows, err := s.db.Query(searchQuery, ftsExpr, limit, offset)
+	`, ftsWhereSQL, orderBy)
+
+	finalArgs := append(ftsArgs, filter.Limit, filter.Offset)
+	rows, err := s.db.Query(searchQuery, finalArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -271,11 +418,19 @@ func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, in
 		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
 			return nil, 0, err
 		}
-		r.CreatedTime, _ = time.Parse("2006-01-02 15:04:05", createdStr)
+		r.CreatedTime = parseDBTime(createdStr)
 		records = append(records, r)
 	}
 
 	return records, total, nil
+}
+
+func (s *Store) Search(query string, limit int, offset int) ([]TorrentRecord, int64, error) {
+	return s.SearchWithFilter(SearchFilter{
+		Query:  query,
+		Limit:  limit,
+		Offset: offset,
+	})
 }
 
 func (s *Store) GetStats() (Stats, error) {
@@ -292,6 +447,22 @@ func (s *Store) GetStats() (Stats, error) {
 	return st, err
 }
 
+func (s *Store) GetCategories() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT category FROM torrents WHERE category != '' ORDER BY category ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cats []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err == nil && c != "" {
+			cats = append(cats, c)
+		}
+	}
+	return cats, nil
+}
+
 func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	var r TorrentRecord
 	var createdStr string
@@ -306,6 +477,6 @@ func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.CreatedTime, _ = time.Parse("2006-01-02 15:04:05", createdStr)
+	r.CreatedTime = parseDBTime(createdStr)
 	return &r, nil
 }
