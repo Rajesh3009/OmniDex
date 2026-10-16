@@ -318,6 +318,106 @@ function createBadge(container, labelText, onRemove) {
   container.appendChild(badge);
 }
 
+function openModal(id) {
+  document.getElementById(id).classList.add('active');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+}
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/v1/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    document.getElementById('stat-total-torrents').textContent = data.db.total_torrents.toLocaleString();
+    document.getElementById('stat-total-size').textContent = formatBytes(data.db.total_size_bytes) + ' cataloged';
+    document.getElementById('stat-dht-count').textContent = data.db.dht_count.toLocaleString();
+    document.getElementById('stat-dht-announces').textContent = `${data.dht.announces_received.toLocaleString()} KRPC announces`;
+    document.getElementById('stat-prowlarr-count').textContent = data.db.prowlarr_count.toLocaleString();
+    
+    const dhtNodesEl = document.getElementById('stat-dht-nodes');
+    if (dhtNodesEl) {
+      dhtNodesEl.textContent = `${data.dht.good_nodes || 0} Nodes`;
+    }
+    document.getElementById('stat-queue-len').textContent = `${data.dht.good_nodes || 0} good / ${data.dht.total_nodes || 0} total routing nodes`;
+  } catch (e) {
+    console.error('Stats error:', e);
+  }
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/v1/config');
+    if (!res.ok) return;
+    const cfg = await res.json();
+
+    document.getElementById('cfg-prowlarr-url').value = cfg.prowlarr_url || '';
+    document.getElementById('cfg-prowlarr-key').value = cfg.prowlarr_api_key || '';
+    document.getElementById('cfg-torznab-key').value = cfg.torznab_api_key || '';
+    document.getElementById('cfg-dht-workers').value = cfg.dht_workers || 15;
+
+    document.getElementById('torznab-key-display').textContent = cfg.torznab_api_key || 'N/A';
+    document.getElementById('torznab-url-display').textContent = `${window.location.origin}/api/v1/torznab`;
+  } catch (e) {
+    console.error('Config fetch error:', e);
+  }
+}
+
+async function performSearch(overrideQuery) {
+  const loading = document.getElementById('loading-spinner');
+  const countText = document.getElementById('results-count-text');
+  const tbody = document.getElementById('torrents-tbody');
+  const emptyState = document.getElementById('empty-state');
+  const checkProwlarr = document.getElementById('check-prowlarr-live');
+  const queryProwlarr = checkProwlarr ? checkProwlarr.checked : false;
+
+  if (overrideQuery !== undefined) {
+    filterState.query = overrideQuery;
+  }
+
+  if (loading) loading.style.display = 'inline-block';
+  renderActiveFilterBadges();
+
+  try {
+    const params = new URLSearchParams({
+      q: filterState.query,
+      category: filterState.category !== 'all' ? filterState.category : '',
+      source: filterState.source !== 'all' ? filterState.source : '',
+      sort: filterState.sort,
+      min_size: filterState.minSize > 0 ? filterState.minSize.toString() : '',
+      max_size: filterState.maxSize > 0 ? filterState.maxSize.toString() : '',
+      limit: filterState.limit.toString(),
+      prowlarr: queryProwlarr ? 'true' : 'false'
+    });
+
+    const res = await fetch(`/api/v1/search?${params.toString()}`);
+    const data = await res.json();
+
+    currentTorrents = data.items || [];
+    renderTable(currentTorrents);
+
+    if (countText) {
+      if (filterState.query.trim() === '') {
+        countText.textContent = `Showing latest ${currentTorrents.length} torrents (Total: ${data.total})`;
+      } else {
+        countText.textContent = `Found ${data.total} results for "${filterState.query}"`;
+      }
+    }
+
+    if (emptyState) {
+      emptyState.style.display = currentTorrents.length === 0 ? 'block' : 'none';
+    }
+  } catch (err) {
+    console.error('Search error:', err);
+    if (countText) countText.textContent = 'Error fetching search results';
+  } finally {
+    if (loading) loading.style.display = 'none';
+  }
+}
+
 function renderTable(items) {
   const tbody = document.getElementById('torrents-tbody');
   tbody.innerHTML = '';
