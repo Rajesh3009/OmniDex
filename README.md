@@ -1,9 +1,9 @@
-# Local Torrent Indexer & Hybrid Prowlarr Bridge
+# OmniDex — Hybrid DHT Indexer & Torznab Bridge
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](file:///d:/Projects/Web/torrent_indexer/main.go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](file:///d:/Projects/Web/torrent_indexer/LICENSE)
 
-A lightweight, high-performance personal torrent indexer daemon and Web UI running on Go and embedded SQLite (FTS5).
+**OmniDex** is a lightweight, high-performance personal torrent indexer daemon and Web UI running on Go and embedded SQLite (FTS5).
 
 ## ✨ Features
 
@@ -37,7 +37,7 @@ A lightweight, high-performance personal torrent indexer daemon and Web UI runni
 
 ### 1. Run the Executable
 ```powershell
-.\torrent-indexer.exe
+.\omnidex.exe
 ```
 
 ### 2. Access Web Dashboard

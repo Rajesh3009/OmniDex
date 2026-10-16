@@ -118,7 +118,7 @@ func main() {
 
 	go func() {
 		log.Printf("=================================================================")
-		log.Printf("⚡ Local Torrent Indexer & Torznab Bridge v%s is running!", Version)
+		log.Printf("⚡ OmniDex - Hybrid DHT Indexer & Torznab Bridge v%s is running!", Version)
 		log.Printf("🌐 Web Dashboard:   http://localhost:%d", cfg.WebPort)
 		log.Printf("📡 Torznab Endpoint: http://localhost:%d/api/v1/torznab?apikey=%s", cfg.WebPort, cfg.TorznabAPIKey)
 		log.Printf("💾 Database:         %s (FTS5 enabled)", cfg.DBPath)

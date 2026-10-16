@@ -135,7 +135,7 @@ func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
 	caps := CapsRoot{
 		Server: CapsServer{
 			Version: "1.0",
-			Title:   "Local Torrent Indexer & Hybrid Prowlarr Bridge",
+			Title:   "OmniDex - Hybrid DHT Indexer & Torznab Bridge",
 		},
 		Limits: CapsLimits{
 			Max:     100,
@@ -235,7 +235,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Version: "2.0",
 		Torznab: "http://torznab.com/schemas/2015/feed",
 		Channel: Channel{
-			Title:       "Local Torrent Indexer Torznab Feed",
+			Title:       "OmniDex Torznab Feed",
 			Description: "Torznab compatible feed for Prowlarr/Radarr/Sonarr",
 			Link:        s.baseURL,
 			Items:       items,

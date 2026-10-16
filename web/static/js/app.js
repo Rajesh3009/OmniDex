@@ -1,4 +1,4 @@
-// Local Torrent Indexer frontend application
+// OmniDex frontend application
 let currentTorrents = [];
 let lastTotalPages = 1;
 
