@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initStatsToggle();
   loadStats();
   loadConfig();
+  performSearch();
   checkUrlHash();
 
   // Auto-refresh metrics every 3 seconds
@@ -177,6 +178,14 @@ function initEventListeners() {
     btn.addEventListener('click', () => {
       const modalId = btn.getAttribute('data-close');
       closeModal(modalId);
+    });
+  });
+
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeModal(overlay.id);
+      }
     });
   });
 
@@ -400,7 +409,11 @@ function openModal(id) {
 }
 
 function closeModal(id) {
-  document.getElementById(id).classList.remove('active');
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.remove('active');
+  if (id === 'modal-details' && window.location.hash) {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
 }
 
 async function loadStats() {
@@ -938,7 +951,6 @@ function renderFilesList(files) {
 function showDetails(index) {
   const item = currentTorrents[index];
   if (item) {
-    window.location.hash = item.info_hash;
     openTorrentDetails(item);
   }
 }
@@ -946,7 +958,6 @@ function showDetails(index) {
 function showFiles(index) {
   const item = currentTorrents[index];
   if (item) {
-    window.location.hash = item.info_hash;
     openTorrentDetails(item);
     setTimeout(() => {
       const filterInput = document.getElementById('detail-files-filter');
@@ -957,31 +968,20 @@ function showFiles(index) {
 
 async function checkUrlHash() {
   const hash = (window.location.hash || '').replace(/^[#/]+/, '').trim();
-  if (!hash) {
-    performSearch();
+  if (!hash || hash.length < 32) {
     return;
   }
 
-  if (hash.length >= 32) {
-    const searchInput = document.getElementById('search-input');
-    if (searchInput) searchInput.value = hash;
-    filterState.query = hash;
-    filterState.page = 1;
-    performSearch();
-
-    try {
-      const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(hash)}`);
-      if (res.ok) {
-        const item = await res.json();
-        if (item && item.info_hash) {
-          openTorrentDetails(item);
-        }
+  try {
+    const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(hash)}`);
+    if (res.ok) {
+      const item = await res.json();
+      if (item && item.info_hash) {
+        openTorrentDetails(item);
       }
-    } catch (e) {
-      console.error('Error fetching torrent by hash:', e);
     }
-  } else {
-    performSearch();
+  } catch (e) {
+    console.error('Error fetching torrent by hash:', e);
   }
 }
 
