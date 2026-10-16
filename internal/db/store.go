@@ -223,7 +223,7 @@ func buildOrderBy(sortBy string, hasFTS bool) string {
 
 func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, error) {
 	if filter.Limit <= 0 {
-		filter.Limit = 50
+		filter.Limit = 20
 	}
 	if filter.Limit > 200 {
 		filter.Limit = 200

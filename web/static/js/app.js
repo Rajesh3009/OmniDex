@@ -1,5 +1,6 @@
 // Local Torrent Indexer frontend application
 let currentTorrents = [];
+let lastTotalPages = 1;
 
 const filterState = {
   query: '',
@@ -9,7 +10,8 @@ const filterState = {
   minSize: 0,
   maxSize: 0,
   sort: 'created_desc',
-  limit: 50,
+  page: 1,
+  limit: 20,
   offset: 0
 };
 
@@ -29,12 +31,14 @@ function initEventListeners() {
 
   btnSearch.addEventListener('click', () => {
     filterState.query = searchInput.value;
+    filterState.page = 1;
     performSearch();
   });
 
   searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       filterState.query = searchInput.value;
+      filterState.page = 1;
       performSearch();
     }
   });
@@ -43,6 +47,7 @@ function initEventListeners() {
   document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const category = btn.getAttribute('data-category');
+      filterState.page = 1;
       setCategoryFilter(category);
     });
   });
@@ -52,6 +57,7 @@ function initEventListeners() {
   if (sourceSelect) {
     sourceSelect.addEventListener('change', () => {
       filterState.source = sourceSelect.value;
+      filterState.page = 1;
       performSearch();
     });
   }
@@ -61,6 +67,7 @@ function initEventListeners() {
   if (sizeSelect) {
     sizeSelect.addEventListener('change', () => {
       setSizePreset(sizeSelect.value);
+      filterState.page = 1;
       performSearch();
     });
   }
@@ -70,6 +77,7 @@ function initEventListeners() {
   if (sortSelect) {
     sortSelect.addEventListener('change', () => {
       filterState.sort = sortSelect.value;
+      filterState.page = 1;
       updateSortIndicators();
       performSearch();
     });
@@ -79,6 +87,7 @@ function initEventListeners() {
   document.querySelectorAll('.th-sortable').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.getAttribute('data-sort-key');
+      filterState.page = 1;
       handleHeaderSort(key);
     });
   });
@@ -90,6 +99,41 @@ function initEventListeners() {
       resetFilters();
     });
   }
+
+  // Pagination limit selector
+  const limitSelect = document.getElementById('select-page-limit');
+  if (limitSelect) {
+    limitSelect.addEventListener('change', () => {
+      filterState.limit = parseInt(limitSelect.value, 10) || 20;
+      filterState.page = 1;
+      performSearch();
+    });
+  }
+
+  // Pagination navigation buttons
+  document.getElementById('btn-page-first')?.addEventListener('click', () => {
+    if (filterState.page > 1) {
+      goToPage(1);
+    }
+  });
+
+  document.getElementById('btn-page-prev')?.addEventListener('click', () => {
+    if (filterState.page > 1) {
+      goToPage(filterState.page - 1);
+    }
+  });
+
+  document.getElementById('btn-page-next')?.addEventListener('click', () => {
+    if (filterState.page < lastTotalPages) {
+      goToPage(filterState.page + 1);
+    }
+  });
+
+  document.getElementById('btn-page-last')?.addEventListener('click', () => {
+    if (filterState.page < lastTotalPages) {
+      goToPage(lastTotalPages);
+    }
+  });
 
   // Modal controls
   document.getElementById('btn-show-graph').addEventListener('click', () => {
@@ -247,6 +291,8 @@ function resetFilters() {
   filterState.category = 'all';
   filterState.source = 'all';
   filterState.sort = 'created_desc';
+  filterState.page = 1;
+  filterState.limit = 20;
   setSizePreset('all');
 
   document.getElementById('search-input').value = '';
@@ -256,6 +302,8 @@ function resetFilters() {
   if (filterSize) filterSize.value = 'all';
   const sortSelect = document.getElementById('sort-select');
   if (sortSelect) sortSelect.value = 'created_desc';
+  const limitSelect = document.getElementById('select-page-limit');
+  if (limitSelect) limitSelect.value = '20';
 
   document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-category') === 'all');
@@ -394,7 +442,9 @@ async function performSearch(overrideQuery) {
       sort: filterState.sort,
       min_size: filterState.minSize > 0 ? filterState.minSize.toString() : '',
       max_size: filterState.maxSize > 0 ? filterState.maxSize.toString() : '',
+      page: filterState.page.toString(),
       limit: filterState.limit.toString(),
+      offset: ((filterState.page - 1) * filterState.limit).toString(),
       prowlarr: queryProwlarr ? 'true' : 'false'
     });
 
@@ -404,23 +454,119 @@ async function performSearch(overrideQuery) {
     currentTorrents = data.items || [];
     renderTable(currentTorrents);
 
+    const total = data.total || 0;
+    const limit = filterState.limit;
+    const page = filterState.page;
+    const totalPages = data.total_pages || Math.max(1, Math.ceil(total / limit));
+    lastTotalPages = totalPages;
+
     if (countText) {
       if (filterState.query.trim() === '') {
-        countText.textContent = `Showing latest ${currentTorrents.length} torrents (Total: ${data.total})`;
+        countText.textContent = `Showing ${currentTorrents.length} of ${total.toLocaleString()} torrents (Page ${page} of ${totalPages})`;
       } else {
-        countText.textContent = `Found ${data.total} results for "${filterState.query}"`;
+        countText.textContent = `Found ${total.toLocaleString()} results for "${filterState.query}" (Page ${page} of ${totalPages})`;
       }
     }
 
     if (emptyState) {
       emptyState.style.display = currentTorrents.length === 0 ? 'block' : 'none';
     }
+
+    renderPagination(total, page, limit, totalPages);
   } catch (err) {
     console.error('Search error:', err);
     if (countText) countText.textContent = 'Error fetching search results';
   } finally {
     if (loading) loading.style.display = 'none';
   }
+}
+
+function goToPage(p) {
+  if (p < 1 || (lastTotalPages && p > lastTotalPages)) return;
+  filterState.page = p;
+  filterState.offset = (p - 1) * filterState.limit;
+  performSearch();
+  const tableWrap = document.querySelector('.torrent-table-wrap');
+  if (tableWrap) {
+    tableWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function renderPagination(total, page, limit, totalPages) {
+  const paginationBar = document.getElementById('pagination-bar');
+  if (!paginationBar) return;
+
+  if (total <= 0) {
+    paginationBar.style.display = 'none';
+    return;
+  }
+  paginationBar.style.display = 'flex';
+
+  const start = (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+
+  const startEl = document.getElementById('page-start');
+  const endEl = document.getElementById('page-end');
+  const totalEl = document.getElementById('page-total');
+  if (startEl) startEl.textContent = start.toLocaleString();
+  if (endEl) endEl.textContent = end.toLocaleString();
+  if (totalEl) totalEl.textContent = total.toLocaleString();
+
+  const btnFirst = document.getElementById('btn-page-first');
+  const btnPrev = document.getElementById('btn-page-prev');
+  const btnNext = document.getElementById('btn-page-next');
+  const btnLast = document.getElementById('btn-page-last');
+
+  if (btnFirst) btnFirst.disabled = page <= 1;
+  if (btnPrev) btnPrev.disabled = page <= 1;
+  if (btnNext) btnNext.disabled = page >= totalPages;
+  if (btnLast) btnLast.disabled = page >= totalPages;
+
+  const pageNums = document.getElementById('page-numbers');
+  if (pageNums) {
+    pageNums.innerHTML = '';
+    const maxButtons = 5;
+    let startPage = Math.max(1, page - 2);
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+    if (endPage - startPage < maxButtons - 1) {
+      startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+
+    if (startPage > 1) {
+      addPageBtn(pageNums, 1, page === 1);
+      if (startPage > 2) {
+        addEllipsis(pageNums);
+      }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      addPageBtn(pageNums, i, page === i);
+    }
+
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) {
+        addEllipsis(pageNums);
+      }
+      addPageBtn(pageNums, totalPages, page === totalPages);
+    }
+  }
+}
+
+function addPageBtn(container, pageNum, isActive) {
+  const btn = document.createElement('button');
+  btn.className = `btn-page ${isActive ? 'active' : ''}`;
+  btn.textContent = pageNum;
+  if (!isActive) {
+    btn.addEventListener('click', () => goToPage(pageNum));
+  }
+  container.appendChild(btn);
+}
+
+function addEllipsis(container) {
+  const span = document.createElement('span');
+  span.className = 'page-ellipsis';
+  span.textContent = '…';
+  container.appendChild(span);
 }
 
 function renderTable(items) {

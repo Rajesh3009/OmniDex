@@ -148,8 +148,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	minSize, _ := strconv.ParseInt(r.URL.Query().Get("min_size"), 10, 64)
 	maxSize, _ := strconv.ParseInt(r.URL.Query().Get("max_size"), 10, 64)
 
+	page := 1
 	if limit <= 0 {
-		limit = 50
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if pageParam, _ := strconv.Atoi(r.URL.Query().Get("page")); pageParam > 0 {
+		page = pageParam
+		offset = (page - 1) * limit
+	} else if limit > 0 {
+		page = (offset / limit) + 1
 	}
 
 	// If query requested and prowlarr integration enabled, fetch and ingest in parallel
@@ -182,9 +192,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	totalPages := 0
+	if total > 0 && limit > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
 	resp := map[string]any{
-		"items": results,
-		"total": total,
+		"items":       results,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"offset":      offset,
+		"total_pages": totalPages,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
