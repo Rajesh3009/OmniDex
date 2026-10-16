@@ -4,12 +4,14 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,6 +89,16 @@ func main() {
 	mux.HandleFunc("/torznab", srv.torznab.HandleTorznab)
 	mux.HandleFunc("/torznab/", srv.torznab.HandleTorznab)
 	mux.HandleFunc("/api", srv.torznab.HandleTorznab)
+
+	// Direct single-torrent API and download endpoints
+	mux.HandleFunc("/api/v1/torrent", srv.handleGetTorrent)
+	mux.HandleFunc("/download/", srv.handleDownload)
+	mux.HandleFunc("/api/v1/download", srv.handleDownload)
+	mux.HandleFunc("/api/v1/download/", srv.handleDownload)
+	mux.HandleFunc("/torrent/", func(w http.ResponseWriter, r *http.Request) {
+		hash := strings.TrimPrefix(r.URL.Path, "/torrent/")
+		http.Redirect(w, r, "/#"+hash, http.StatusFound)
+	})
 
 	// REST APIs for UI
 	mux.HandleFunc("/api/v1/search", srv.handleSearch)
@@ -298,4 +310,172 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleGetTorrent(w http.ResponseWriter, r *http.Request) {
+	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
+	}
+	if hash == "" {
+		http.Error(w, "missing hash parameter", http.StatusBadRequest)
+		return
+	}
+	rec, err := s.store.GetTorrentByHash(hash)
+	if err != nil || rec == nil {
+		http.Error(w, "torrent not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(rec)
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	hash := strings.TrimPrefix(path, "/download/")
+	hash = strings.TrimPrefix(hash, "/api/v1/download/")
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("hash"))
+	}
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
+	}
+	hash = strings.TrimSuffix(hash, ".torrent")
+
+	rec, err := s.store.GetTorrentByHash(hash)
+	if err != nil || rec == nil {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
+
+	magnet := rec.MagnetURI
+	if magnet == "" {
+		magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", rec.InfoHash, rec.Name)
+	}
+
+	raw := r.URL.Query().Get("raw") == "1" || r.URL.Query().Get("magnet") == "1"
+	accept := r.Header.Get("Accept")
+	userAgent := strings.ToLower(r.Header.Get("User-Agent"))
+	isAutomated := strings.Contains(userAgent, "sonarr") || strings.Contains(userAgent, "radarr") || strings.Contains(userAgent, "qbittorrent") || strings.Contains(userAgent, "transmission") || strings.Contains(userAgent, "deluge")
+
+	if raw || isAutomated || (accept != "" && !strings.Contains(accept, "text/html")) {
+		http.Redirect(w, r, magnet, http.StatusFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download %s - OmniDex</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 580px;
+      width: 90%%;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: rgba(6, 182, 212, 0.15);
+      color: #06b6d4;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 0 0 12px 0;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .hash {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      background: rgba(0,0,0,0.3);
+      padding: 6px 10px;
+      border-radius: 6px;
+      margin-bottom: 24px;
+      word-break: break-all;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 20px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+    .btn-primary {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+    .info {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">⚡ OmniDex Magnet Launcher</div>
+    <h1>%s</h1>
+    <div class="hash">%s</div>
+    <div class="btn-group">
+      <a href="%s" class="btn btn-primary" id="btn-open-magnet">🧲 Open in Torrent Client</a>
+      <button class="btn btn-secondary" onclick="navigator.clipboard.writeText('%s'); this.textContent = 'Copied Magnet URI!';">📋 Copy Magnet Link</button>
+      <a href="/#%s" class="btn btn-secondary">🔍 View on OmniDex Dashboard</a>
+    </div>
+    <div class="info">Opening magnet in your torrent client automatically...</div>
+  </div>
+  <script>
+    setTimeout(function() {
+      window.location.href = "%s";
+    }, 100);
+  </script>
+</body>
+</html>`, html.EscapeString(rec.Name), html.EscapeString(rec.Name), rec.InfoHash, magnet, magnet, rec.InfoHash, magnet)
+	_, _ = w.Write([]byte(htmlContent))
 }

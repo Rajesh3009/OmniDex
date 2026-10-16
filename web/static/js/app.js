@@ -20,10 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initStatsToggle();
   loadStats();
   loadConfig();
-  performSearch();
+  checkUrlHash();
 
   // Auto-refresh metrics every 3 seconds
   setInterval(loadStats, 3000);
+
+  window.addEventListener('hashchange', checkUrlHash);
 });
 
 function initEventListeners() {
@@ -670,8 +672,7 @@ function renderTable(items) {
   });
 }
 
-function showDetails(index) {
-  const item = currentTorrents[index];
+function openTorrentDetails(item) {
   if (!item) return;
 
   document.getElementById('detail-title').textContent = item.name;
@@ -687,11 +688,11 @@ function showDetails(index) {
   let files = [];
   try {
     if (item.files_json) {
-      files = JSON.parse(item.files_json);
+      files = typeof item.files_json === 'string' ? JSON.parse(item.files_json) : item.files_json;
     }
   } catch (e) {}
 
-  if (files.length === 0) {
+  if (!files || files.length === 0) {
     files = [item.name];
   }
 
@@ -703,6 +704,44 @@ function showDetails(index) {
   });
 
   openModal('modal-details');
+}
+
+function showDetails(index) {
+  const item = currentTorrents[index];
+  if (item) {
+    window.location.hash = item.info_hash;
+    openTorrentDetails(item);
+  }
+}
+
+async function checkUrlHash() {
+  const hash = (window.location.hash || '').replace(/^[#/]+/, '').trim();
+  if (!hash) {
+    performSearch();
+    return;
+  }
+
+  if (hash.length >= 32) {
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.value = hash;
+    filterState.query = hash;
+    filterState.page = 1;
+    performSearch();
+
+    try {
+      const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(hash)}`);
+      if (res.ok) {
+        const item = await res.json();
+        if (item && item.info_hash) {
+          openTorrentDetails(item);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching torrent by hash:', e);
+    }
+  } else {
+    performSearch();
+  }
 }
 
 function formatBytes(bytes) {

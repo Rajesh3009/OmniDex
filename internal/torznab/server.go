@@ -292,16 +292,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", t.InfoHash, t.Name)
 		}
 
+		downloadURL := fmt.Sprintf("%s/download/%s", s.baseURL, t.InfoHash)
+
 		item := Item{
 			Title:    t.Name,
 			GUID:     t.InfoHash,
 			Comments: fmt.Sprintf("%s/#%s", s.baseURL, t.InfoHash),
 			PubDate:  t.CreatedTime.Format(time.RFC1123Z),
 			Size:     t.Size,
-			Link:     magnet,
+			Link:     downloadURL,
 			Category: strconv.Itoa(catID),
 			Enclosure: Enclosure{
-				URL:    magnet,
+				URL:    downloadURL,
 				Length: t.Size,
 				Type:   "application/x-bittorrent",
 			},
@@ -312,6 +314,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				{Name: "peers", Value: strconv.Itoa(t.Seeders + t.Leechers)},
 				{Name: "category", Value: strconv.Itoa(catID)},
 				{Name: "magneturl", Value: magnet},
+				{Name: "downloadvolumefactor", Value: "0"},
+				{Name: "uploadvolumefactor", Value: "1"},
 			},
 		}
 		items = append(items, item)

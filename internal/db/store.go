@@ -479,6 +479,25 @@ func (s *Store) GetCategories() ([]string, error) {
 	return cats, nil
 }
 
+func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
+	cleanHash := strings.ToLower(strings.TrimSpace(hash))
+	row := s.db.QueryRow(`
+		SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
+		FROM torrents
+		WHERE LOWER(info_hash) = ?
+		LIMIT 1
+	`, cleanHash)
+
+	var r TorrentRecord
+	var createdStr string
+	err := row.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON)
+	if err != nil {
+		return nil, err
+	}
+	r.CreatedTime = parseDBTime(createdStr)
+	return &r, nil
+}
+
 func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	var r TorrentRecord
 	var createdStr string
