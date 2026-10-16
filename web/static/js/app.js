@@ -490,7 +490,64 @@ async function loadConfig() {
   }
 }
 
-async function performSearch(overrideQuery) {
+let prowlarrSearchSeq = 0;
+let prowlarrAbortCtrl = null;
+
+async function triggerBackgroundProwlarrSearch(query) {
+  const indicator = document.getElementById('prowlarr-live-indicator');
+  if (!indicator) return;
+
+  const currentSeq = ++prowlarrSearchSeq;
+  if (prowlarrAbortCtrl) {
+    try { prowlarrAbortCtrl.abort(); } catch (e) {}
+  }
+  prowlarrAbortCtrl = new AbortController();
+
+  indicator.className = 'prowlarr-status-pill';
+  indicator.textContent = '📡 Querying Prowlarr in background...';
+  indicator.style.display = 'inline-flex';
+
+  try {
+    const res = await fetch(`/api/v1/prowlarr/search?q=${encodeURIComponent(query)}&limit=30`, {
+      signal: prowlarrAbortCtrl.signal
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    if (currentSeq !== prowlarrSearchSeq) return;
+
+    if (data.status === 'unconfigured') {
+      indicator.style.display = 'none';
+      return;
+    }
+
+    if (data.added > 0) {
+      indicator.className = 'prowlarr-status-pill success';
+      indicator.textContent = `✓ Prowlarr added ${data.added} new torrent${data.added > 1 ? 's' : ''}`;
+      // Refresh local results to show the newly ingested items
+      performSearch(undefined, false);
+      setTimeout(() => {
+        if (currentSeq === prowlarrSearchSeq) {
+          indicator.style.display = 'none';
+        }
+      }, 4000);
+    } else {
+      indicator.className = 'prowlarr-status-pill dim';
+      indicator.textContent = data.count > 0 ? `✓ Prowlarr checked (${data.count} already indexed)` : `✓ Prowlarr checked (no external results)`;
+      setTimeout(() => {
+        if (currentSeq === prowlarrSearchSeq) {
+          indicator.style.display = 'none';
+        }
+      }, 2500);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    if (currentSeq !== prowlarrSearchSeq) return;
+    indicator.style.display = 'none';
+  }
+}
+
+async function performSearch(overrideQuery, triggerProwlarr = true) {
   const loading = document.getElementById('loading-spinner');
   const countText = document.getElementById('results-count-text');
   const tbody = document.getElementById('torrents-tbody');
@@ -516,7 +573,7 @@ async function performSearch(overrideQuery) {
       page: filterState.page.toString(),
       limit: filterState.limit.toString(),
       offset: ((filterState.page - 1) * filterState.limit).toString(),
-      prowlarr: queryProwlarr ? 'true' : 'false'
+      prowlarr: 'false' // Local search is always non-blocking
     });
 
     const res = await fetch(`/api/v1/search?${params.toString()}`);
@@ -544,6 +601,11 @@ async function performSearch(overrideQuery) {
     }
 
     renderPagination(total, page, limit, totalPages);
+
+    // After instant local search finishes, if Prowlarr is enabled, query in background
+    if (triggerProwlarr && queryProwlarr && filterState.query.trim() !== '' && filterState.page === 1) {
+      triggerBackgroundProwlarrSearch(filterState.query.trim());
+    }
   } catch (err) {
     console.error('Search error:', err);
     if (countText) countText.textContent = 'Error fetching search results';

@@ -50,15 +50,15 @@ type Store struct {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	// Enable WAL mode and foreign keys for high concurrent reading & writing
-	connStr := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)", dbPath)
+	// Enable WAL mode, 64MB cache, memory temp store, memory mapping and busy timeout
+	connStr := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)", dbPath)
 	db, err := sql.Open("sqlite", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db.SetMaxOpenConns(1) // SQLite single writer safety
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(10) // High concurrency WAL readers
+	db.SetMaxIdleConns(5)
 
 	s := &Store{db: db, dbPath: dbPath}
 	if err := s.initSchema(); err != nil {
@@ -93,6 +93,8 @@ func (s *Store) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_torrents_created ON torrents(created_time DESC);
 	CREATE INDEX IF NOT EXISTS idx_torrents_size ON torrents(size DESC);
 	CREATE INDEX IF NOT EXISTS idx_torrents_source ON torrents(source);
+	CREATE INDEX IF NOT EXISTS idx_torrents_category ON torrents(category);
+	CREATE INDEX IF NOT EXISTS idx_torrents_seeders ON torrents(seeders DESC);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS torrents_fts USING fts5(
 		name,

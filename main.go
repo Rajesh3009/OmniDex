@@ -102,6 +102,7 @@ func main() {
 
 	// REST APIs for UI
 	mux.HandleFunc("/api/v1/search", srv.handleSearch)
+	mux.HandleFunc("/api/v1/prowlarr/search", srv.handleProwlarrSearch)
 	mux.HandleFunc("/api/v1/stats", srv.handleStats)
 	mux.HandleFunc("/api/v1/categories", srv.handleCategories)
 	mux.HandleFunc("/api/v1/dht/graph", srv.handleDHTGraph)
@@ -156,7 +157,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	queryProwlarr := r.URL.Query().Get("prowlarr") == "true"
 
 	category := r.URL.Query().Get("category")
 	source := r.URL.Query().Get("source")
@@ -179,19 +179,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		offset = (page - 1) * limit
 	} else if limit > 0 {
 		page = (offset / limit) + 1
-	}
-
-	// If query requested and prowlarr integration enabled, fetch and ingest in parallel
-	if q != "" && queryProwlarr && s.prowl != nil && s.cfg.ProwlarrAPIKey != "" {
-		prowlResults, err := s.prowl.Search(q, limit)
-		if err == nil {
-			for _, item := range prowlResults {
-				rec := item.ToRecord()
-				if rec.InfoHash != "" {
-					_ = s.store.UpsertTorrent(&rec)
-				}
-			}
-		}
 	}
 
 	filter := db.SearchFilter{
@@ -479,3 +466,61 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 </html>`, html.EscapeString(rec.Name), html.EscapeString(rec.Name), rec.InfoHash, magnet, magnet, rec.InfoHash, magnet)
 	_, _ = w.Write([]byte(htmlContent))
 }
+
+func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "added": 0, "count": 0})
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+
+	if s.prowl == nil || s.cfg.ProwlarrAPIKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "unconfigured",
+			"error":  "Prowlarr is not configured",
+			"added":  0,
+			"count":  0,
+		})
+		return
+	}
+
+	prowlResults, err := s.prowl.Search(q, limit)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "error",
+			"error":  err.Error(),
+			"added":  0,
+			"count":  0,
+		})
+		return
+	}
+
+	addedCount := 0
+	for _, item := range prowlResults {
+		rec := item.ToRecord()
+		if rec.InfoHash != "" {
+			exists, _ := s.store.Exists(rec.InfoHash)
+			if !exists {
+				addedCount++
+			}
+			_ = s.store.UpsertTorrent(&rec)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"query":  q,
+		"count":  len(prowlResults),
+		"added":  addedCount,
+	})
+}
+

@@ -1093,3 +1093,39 @@ body {
   flex-shrink: 0;
   margin-left: 10px;
 }
+
+/* Background Prowlarr Sync Status */
+.prowlarr-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-purple);
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  animation: pulse-soft 1.8s infinite ease-in-out;
+}
+
+.prowlarr-status-pill.success {
+  color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  animation: none;
+}
+
+.prowlarr-status-pill.dim {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  animation: none;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.95; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.98); }
+}
+

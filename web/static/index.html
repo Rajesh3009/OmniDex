@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=9">
+  <link rel="stylesheet" href="/static/css/style.css?v=10">
 </head>
 <body>
   <div class="container">
@@ -87,11 +87,12 @@
         <div class="search-modes">
           <label class="checkbox-label">
             <input type="checkbox" id="check-prowlarr-live" checked>
-            <span>Query Prowlarr external indexers if configured</span>
+            <span>Query Prowlarr external indexers (instant local search first, then Prowlarr in background)</span>
           </label>
         </div>
-        <div>
-          <span>Tip: Press Enter to execute instant FTS5 match</span>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="prowlarr-live-indicator" class="prowlarr-status-pill" style="display: none;"></span>
+          <span style="font-size: 0.8rem; color: var(--text-dim);">⚡ Instant SQLite FTS5 Match</span>
         </div>
       </div>
     </section>
@@ -430,6 +431,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>
