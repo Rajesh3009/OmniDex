@@ -343,6 +343,11 @@ async function loadStats() {
       dhtNodesEl.textContent = `${data.dht.good_nodes || 0} Nodes`;
     }
     document.getElementById('stat-queue-len').textContent = `${data.dht.good_nodes || 0} good / ${data.dht.total_nodes || 0} total routing nodes`;
+
+    const dbSizeEl = document.getElementById('stat-db-size');
+    if (dbSizeEl && data.db.db_size_bytes !== undefined) {
+      dbSizeEl.textContent = formatBytes(data.db.db_size_bytes);
+    }
   } catch (e) {
     console.error('Stats error:', e);
   }

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -25,10 +26,11 @@ type TorrentRecord struct {
 }
 
 type Stats struct {
-	TotalTorrents int64 `json:"total_torrents"`
-	DHTCount      int64 `json:"dht_count"`
-	ProwlarrCount int64 `json:"prowlarr_count"`
+	TotalTorrents  int64 `json:"total_torrents"`
+	DHTCount       int64 `json:"dht_count"`
+	ProwlarrCount  int64 `json:"prowlarr_count"`
 	TotalSizeBytes int64 `json:"total_size_bytes"`
+	DBSizeBytes    int64 `json:"db_size_bytes"`
 }
 
 type SearchFilter struct {
@@ -43,7 +45,8 @@ type SearchFilter struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbPath string
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -57,7 +60,7 @@ func NewStore(dbPath string) (*Store, error) {
 	db.SetMaxOpenConns(1) // SQLite single writer safety
 	db.SetMaxIdleConns(1)
 
-	s := &Store{db: db}
+	s := &Store{db: db, dbPath: dbPath}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
@@ -444,7 +447,20 @@ func (s *Store) GetStats() (Stats, error) {
 		FROM torrents
 	`)
 	err := row.Scan(&st.TotalTorrents, &st.DHTCount, &st.ProwlarrCount, &st.TotalSizeBytes)
+	if err == nil {
+		st.DBSizeBytes = s.getDiskSize()
+	}
 	return st, err
+}
+
+func (s *Store) getDiskSize() int64 {
+	var total int64
+	for _, p := range []string{s.dbPath, s.dbPath + "-wal", s.dbPath + "-shm"} {
+		if fi, err := os.Stat(p); err == nil {
+			total += fi.Size()
+		}
+	}
+	return total
 }
 
 func (s *Store) GetCategories() ([]string, error) {
