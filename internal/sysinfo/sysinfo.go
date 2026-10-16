@@ -2,6 +2,7 @@ package sysinfo
 
 import (
 	"runtime"
+	"sync"
 )
 
 type MemoryStats struct {
@@ -11,28 +12,53 @@ type MemoryStats struct {
 	HeapInuseBytes  uint64 `json:"heap_inuse_bytes"`
 	StackInuseBytes uint64 `json:"stack_inuse_bytes"`
 	RSSBytes        uint64 `json:"rss_bytes"`
+	MinRSSBytes     uint64 `json:"min_rss_bytes"`
+	MaxRSSBytes     uint64 `json:"max_rss_bytes"`
+	PeakRSSBytes    uint64 `json:"peak_rss_bytes"`
 	NumGC           uint32 `json:"num_gc"`
 	NumGoroutine    int    `json:"num_goroutine"`
 }
+
+var (
+	memMu  sync.Mutex
+	minRSS uint64
+	maxRSS uint64
+)
 
 func GetMemoryStats() MemoryStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	stats := MemoryStats{
+	rss, peak := getRSSAndPeak()
+	if rss == 0 {
+		rss = m.Sys
+	}
+
+	memMu.Lock()
+	if minRSS == 0 || (rss > 0 && rss < minRSS) {
+		minRSS = rss
+	}
+	if rss > maxRSS {
+		maxRSS = rss
+	}
+	if peak > maxRSS {
+		maxRSS = peak
+	}
+	currMin := minRSS
+	currMax := maxRSS
+	memMu.Unlock()
+
+	return MemoryStats{
 		AllocBytes:      m.Alloc,
 		TotalAllocBytes: m.TotalAlloc,
 		SysBytes:        m.Sys,
 		HeapInuseBytes:  m.HeapInuse,
 		StackInuseBytes: m.StackInuse,
+		RSSBytes:        rss,
+		MinRSSBytes:     currMin,
+		MaxRSSBytes:     currMax,
+		PeakRSSBytes:    peak,
 		NumGC:           m.NumGC,
 		NumGoroutine:    runtime.NumGoroutine(),
-		RSSBytes:        getRSS(),
 	}
-
-	if stats.RSSBytes == 0 {
-		stats.RSSBytes = stats.SysBytes
-	}
-
-	return stats
 }

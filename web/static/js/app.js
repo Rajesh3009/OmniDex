@@ -17,6 +17,7 @@ const filterState = {
 
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
+  initStatsToggle();
   loadStats();
   loadConfig();
   performSearch();
@@ -403,17 +404,44 @@ async function loadStats() {
       const mem = data.memory;
       const displayRam = mem.rss_bytes || mem.alloc_bytes;
       ramEl.textContent = formatBytes(displayRam);
+
+      const minRam = mem.min_rss_bytes || displayRam;
+      const maxRam = mem.max_rss_bytes || mem.peak_rss_bytes || displayRam;
+
       if (ramSubEl) {
-        ramSubEl.textContent = `${formatBytes(mem.alloc_bytes)} heap · ${formatBytes(mem.sys_bytes)} OS`;
+        ramSubEl.textContent = `Min: ${formatBytes(minRam)} · Max: ${formatBytes(maxRam)}`;
         const card = ramEl.closest('.stat-card');
         if (card) {
-          card.title = `Working Set (RSS): ${formatBytes(mem.rss_bytes)}\nGo Heap Allocated: ${formatBytes(mem.alloc_bytes)}\nOS Virtual Sys: ${formatBytes(mem.sys_bytes)}\nGoroutines: ${mem.num_goroutine}\nGC Cycles: ${mem.num_gc}`;
+          card.title = `Current RAM (Working Set): ${formatBytes(displayRam)}\nMinimum Observed: ${formatBytes(minRam)}\nMaximum / Peak: ${formatBytes(maxRam)}\nGo Heap Allocated: ${formatBytes(mem.alloc_bytes)}\nOS Virtual Sys: ${formatBytes(mem.sys_bytes)}\nActive Goroutines: ${mem.num_goroutine}\nGC Cycles: ${mem.num_gc}`;
         }
       }
     }
   } catch (e) {
     console.error('Stats error:', e);
   }
+}
+
+function initStatsToggle() {
+  const btnToggle = document.getElementById('btn-toggle-stats');
+  const statsGrid = document.querySelector('.stats-grid');
+  const toggleText = document.getElementById('toggle-stats-text');
+  if (!btnToggle || !statsGrid) return;
+
+  const isHiddenSaved = localStorage.getItem('hide_stats') === 'true';
+  if (isHiddenSaved) {
+    statsGrid.classList.add('stats-hidden');
+    btnToggle.classList.add('is-hidden');
+    if (toggleText) toggleText.textContent = 'Show Stats';
+  }
+
+  btnToggle.addEventListener('click', () => {
+    const isHidden = statsGrid.classList.toggle('stats-hidden');
+    btnToggle.classList.toggle('is-hidden', isHidden);
+    if (toggleText) {
+      toggleText.textContent = isHidden ? 'Show Stats' : 'Hide Stats';
+    }
+    localStorage.setItem('hide_stats', isHidden ? 'true' : 'false');
+  });
 }
 
 async function loadConfig() {

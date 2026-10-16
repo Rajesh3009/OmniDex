@@ -2,6 +2,6 @@
 
 package sysinfo
 
-func getRSS() uint64 {
-	return 0
+func getRSSAndPeak() (uint64, uint64) {
+	return 0, 0
 }

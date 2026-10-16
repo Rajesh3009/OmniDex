@@ -158,6 +158,15 @@ body {
   }
 }
 
+.stats-grid.stats-hidden {
+  display: none !important;
+}
+
+#btn-toggle-stats.is-hidden {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
 .stat-card {
   background: var(--bg-card);
   backdrop-filter: var(--glass-blur);

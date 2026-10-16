@@ -21,7 +21,7 @@ type processMemoryCounters struct {
 	PeakPagefileUsage          uintptr
 }
 
-func getRSS() uint64 {
+func getRSSAndPeak() (uint64, uint64) {
 	var mem processMemoryCounters
 	mem.CB = uint32(unsafe.Sizeof(mem))
 	handle := windows.CurrentProcess()
@@ -33,7 +33,7 @@ func getRSS() uint64 {
 		uintptr(mem.CB),
 	)
 	if r1 != 0 {
-		return uint64(mem.WorkingSetSize)
+		return uint64(mem.WorkingSetSize), uint64(mem.PeakWorkingSetSize)
 	}
-	return 0
+	return 0, 0
 }
