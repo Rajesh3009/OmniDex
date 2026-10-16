@@ -384,6 +384,19 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 
 	magnet := fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hashHex, info.Name)
 
+	stats := t.Stats()
+	seeders := stats.ConnectedSeeders
+	activePeers := stats.ActivePeers
+	if seeders <= 0 && activePeers > 0 {
+		seeders = 1
+	} else if seeders <= 0 {
+		seeders = 1 // An active announcer provided this infohash on the DHT
+	}
+	leechers := activePeers - seeders
+	if leechers < 0 {
+		leechers = 0
+	}
+
 	rec := &db.TorrentRecord{
 		InfoHash:    hashHex,
 		Name:        info.Name,
@@ -393,8 +406,8 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 		PieceLength: info.PieceLength,
 		CreatedTime: time.Now().UTC(),
 		Source:      "dht",
-		Seeders:     0,
-		Leechers:    0,
+		Seeders:     seeders,
+		Leechers:    leechers,
 		Category:    guessCategory(info.Name, fileList),
 		MagnetURI:   magnet,
 	}

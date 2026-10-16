@@ -46,6 +46,23 @@ function initEventListeners() {
     }
   });
 
+  // Clicking on OmniDex brand redirects to clean homepage
+  const brandHome = document.getElementById('brand-home-btn');
+  if (brandHome) {
+    const returnHome = () => {
+      if (window.location.hash) {
+        history.pushState(null, '', window.location.pathname);
+      }
+      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+      resetFilters();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    brandHome.addEventListener('click', returnHome);
+    brandHome.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') returnHome();
+    });
+  }
+
   // Category filter pills
   document.querySelectorAll('#category-pills .pill-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -239,6 +256,8 @@ function handleHeaderSort(key) {
     filterState.sort = current === 'name_asc' ? 'name_desc' : 'name_asc';
   } else if (key === 'category') {
     filterState.sort = current === 'name_asc' ? 'name_desc' : 'name_asc';
+  } else if (key === 'seeders') {
+    filterState.sort = current === 'seeders_desc' ? 'seeders_asc' : 'seeders_desc';
   } else if (key === 'source') {
     filterState.sort = current === 'seeders_desc' ? 'created_desc' : 'seeders_desc';
   }
@@ -257,6 +276,7 @@ function updateSortIndicators() {
     name: document.getElementById('sort-icon-name'),
     category: document.getElementById('sort-icon-category'),
     size: document.getElementById('sort-icon-size'),
+    seeders: document.getElementById('sort-icon-seeders'),
     source: document.getElementById('sort-icon-source'),
     created: document.getElementById('sort-icon-created'),
   };
@@ -286,6 +306,12 @@ function updateSortIndicators() {
   } else if (sort === 'name_desc' && icons.name) {
     icons.name.classList.add('active');
     icons.name.textContent = '▼';
+  } else if (sort === 'seeders_desc' && icons.seeders) {
+    icons.seeders.classList.add('active');
+    icons.seeders.textContent = '▼';
+  } else if (sort === 'seeders_asc' && icons.seeders) {
+    icons.seeders.classList.add('active');
+    icons.seeders.textContent = '▲';
   }
 }
 
@@ -658,13 +684,21 @@ function renderTable(items) {
       </td>
       <td>${catBadge}</td>
       <td>${formatBytes(item.size)}</td>
-      <td>${item.file_count || 1}</td>
+      <td>
+        <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
+          📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
+        </button>
+      </td>
+      <td class="peers-cell">
+        <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
+        <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
+      </td>
       <td>${sourceBadge}</td>
       <td style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
       <td style="text-align: right;">
         <div class="action-btns" style="justify-content: flex-end;">
           <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
-          <button class="btn-icon" onclick="showDetails(${index})" title="Inspect Files">ℹ️</button>
+          <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
         </div>
       </td>
     `;
@@ -672,38 +706,171 @@ function renderTable(items) {
   });
 }
 
-function openTorrentDetails(item) {
+function getFileIcon(filename) {
+  if (!filename) return '📄';
+  const ext = filename.split('.').pop().toLowerCase();
+  const video = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts', 'vob', 'iso'];
+  const audio = ['mp3', 'flac', 'wav', 'aac', 'ogg', 'm4a', 'wma', 'opus'];
+  const subtitle = ['srt', 'sub', 'ass', 'vtt', 'idx', 'smi'];
+  const archive = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz'];
+  const image = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+  const doc = ['pdf', 'epub', 'mobi', 'azw3', 'txt', 'nfo', 'doc', 'docx', 'cbz', 'cbr'];
+  const app = ['exe', 'msi', 'apk', 'dmg', 'pkg', 'deb', 'sh', 'bat'];
+
+  if (video.includes(ext)) return '🎬';
+  if (audio.includes(ext)) return '🎵';
+  if (subtitle.includes(ext)) return '📝';
+  if (archive.includes(ext)) return '📦';
+  if (image.includes(ext)) return '🖼️';
+  if (doc.includes(ext)) return '📚';
+  if (app.includes(ext)) return '💻';
+  return '📄';
+}
+
+let activeDetailFiles = [];
+
+async function openTorrentDetails(item) {
   if (!item) return;
 
   document.getElementById('detail-title').textContent = item.name;
   document.getElementById('detail-hash').textContent = item.info_hash;
+
+  // Metadata Overview Bar
+  const sizeEl = document.getElementById('detail-meta-size');
+  if (sizeEl) sizeEl.textContent = `💾 ${formatBytes(item.size)}`;
+
+  const seedersEl = document.getElementById('detail-meta-seeders');
+  if (seedersEl) seedersEl.textContent = `▲ ${item.seeders || 0} Seeders`;
+
+  const leechersEl = document.getElementById('detail-meta-leechers');
+  if (leechersEl) leechersEl.textContent = `▼ ${item.leechers || 0} Leechers`;
+
+  const catEl = document.getElementById('detail-meta-category');
+  if (catEl) catEl.textContent = `🏷️ ${item.category || 'Other'}`;
+
+  const sourceEl = document.getElementById('detail-meta-source');
+  if (sourceEl) sourceEl.textContent = `📡 ${item.source === 'prowlarr' ? 'Prowlarr' : 'DHT Wire'}`;
+
+  const dateEl = document.getElementById('detail-meta-date');
+  if (dateEl) dateEl.textContent = `🕒 ${formatDate(item.created_time)}`;
   
   const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
   document.getElementById('detail-magnet').textContent = magnet;
   document.getElementById('detail-magnet-link').href = magnet;
 
-  const fileListEl = document.getElementById('detail-files-list');
-  fileListEl.innerHTML = '';
+  const btnCopyMagnet = document.getElementById('btn-copy-magnet');
+  if (btnCopyMagnet) {
+    btnCopyMagnet.onclick = () => {
+      navigator.clipboard.writeText(magnet).then(() => {
+        const orig = btnCopyMagnet.textContent;
+        btnCopyMagnet.textContent = '✓ Copied!';
+        setTimeout(() => btnCopyMagnet.textContent = orig, 1500);
+      });
+    };
+  }
 
-  let files = [];
+  // Parse files
+  let rawFiles = [];
   try {
     if (item.files_json) {
-      files = typeof item.files_json === 'string' ? JSON.parse(item.files_json) : item.files_json;
+      rawFiles = typeof item.files_json === 'string' ? JSON.parse(item.files_json) : item.files_json;
     }
   } catch (e) {}
 
+  activeDetailFiles = normalizeFiles(rawFiles, item.name);
+  renderFilesList(activeDetailFiles);
+
+  const filterInput = document.getElementById('detail-files-filter');
+  if (filterInput) {
+    filterInput.value = '';
+    filterInput.oninput = () => {
+      const q = filterInput.value.trim().toLowerCase();
+      if (!q) {
+        renderFilesList(activeDetailFiles);
+      } else {
+        const filtered = activeDetailFiles.filter(f => f.path.toLowerCase().includes(q));
+        renderFilesList(filtered);
+      }
+    };
+  }
+
+  const btnCopyFiles = document.getElementById('btn-copy-files');
+  if (btnCopyFiles) {
+    btnCopyFiles.onclick = () => {
+      const text = activeDetailFiles.map(f => f.path).join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btnCopyFiles.textContent;
+        btnCopyFiles.textContent = '✓ Copied!';
+        setTimeout(() => btnCopyFiles.textContent = orig, 1500);
+      });
+    };
+  }
+
+  openModal('modal-details');
+
+  // If item had empty or missing files_json, fetch single record to populate
+  if (!rawFiles || rawFiles.length === 0) {
+    const loadingEl = document.getElementById('detail-files-loading');
+    if (loadingEl) loadingEl.style.display = 'inline';
+    try {
+      const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(item.info_hash)}`);
+      if (res.ok) {
+        const fullItem = await res.json();
+        if (fullItem && fullItem.files_json) {
+          const fetchedFiles = typeof fullItem.files_json === 'string' ? JSON.parse(fullItem.files_json) : fullItem.files_json;
+          activeDetailFiles = normalizeFiles(fetchedFiles, item.name);
+          renderFilesList(activeDetailFiles);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load files:', e);
+    } finally {
+      if (loadingEl) loadingEl.style.display = 'none';
+    }
+  }
+}
+
+function normalizeFiles(files, defaultName) {
   if (!files || files.length === 0) {
-    files = [item.name];
+    return [{ path: defaultName || 'Unknown file', size: 0 }];
+  }
+  return files.map(f => {
+    if (typeof f === 'string') {
+      return { path: f, size: 0 };
+    } else if (f && typeof f === 'object') {
+      return { path: f.path || f.name || defaultName, size: f.size || 0 };
+    }
+    return { path: String(f), size: 0 };
+  });
+}
+
+function renderFilesList(files) {
+  const container = document.getElementById('detail-files-list');
+  const countEl = document.getElementById('detail-files-count');
+  if (countEl) countEl.textContent = files.length.toLocaleString();
+  if (!container) return;
+
+  container.innerHTML = '';
+  if (files.length === 0) {
+    container.innerHTML = '<div style="color: var(--text-dim); padding: 12px; text-align: center; font-size: 0.85rem;">No files matched the filter</div>';
+    return;
   }
 
   files.forEach(f => {
-    const d = document.createElement('div');
-    d.className = 'file-item';
-    d.textContent = f;
-    fileListEl.appendChild(d);
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const icon = getFileIcon(f.path);
+    const sizeBadge = f.size > 0 ? `<span class="file-size-badge">${formatBytes(f.size)}</span>` : '';
+    
+    row.innerHTML = `
+      <div class="file-row-left">
+        <span class="file-icon">${icon}</span>
+        <span class="file-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>
+      </div>
+      ${sizeBadge}
+    `;
+    container.appendChild(row);
   });
-
-  openModal('modal-details');
 }
 
 function showDetails(index) {
@@ -711,6 +878,18 @@ function showDetails(index) {
   if (item) {
     window.location.hash = item.info_hash;
     openTorrentDetails(item);
+  }
+}
+
+function showFiles(index) {
+  const item = currentTorrents[index];
+  if (item) {
+    window.location.hash = item.info_hash;
+    openTorrentDetails(item);
+    setTimeout(() => {
+      const filterInput = document.getElementById('detail-files-filter');
+      if (filterInput) filterInput.focus();
+    }, 150);
   }
 }
 

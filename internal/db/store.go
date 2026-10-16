@@ -117,7 +117,12 @@ func (s *Store) initSchema() error {
 	END;
 	`
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Ensure DHT records have at least 1 seeder since an announcer reached our node
+	_, _ = s.db.Exec("UPDATE torrents SET seeders = 1 WHERE source = 'dht' AND seeders <= 0")
+	return nil
 }
 
 func (s *Store) UpsertTorrent(t *TorrentRecord) error {
@@ -271,7 +276,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 		orderBy := buildOrderBy(filter.SortBy, false)
 		querySQL := fmt.Sprintf(`
-			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri
+			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
 			FROM torrents
 			%s
 			ORDER BY %s
@@ -288,7 +293,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
 				return nil, 0, err
 			}
 			r.CreatedTime = parseDBTime(createdStr)
@@ -372,7 +377,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 		orderBy := buildOrderBy(filter.SortBy, false)
 		querySQL := fmt.Sprintf(`
-			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri
+			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
 			FROM torrents
 			%s
 			ORDER BY %s
@@ -389,7 +394,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
 				return nil, 0, err
 			}
 			r.CreatedTime = parseDBTime(createdStr)
@@ -400,7 +405,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 	orderBy := buildOrderBy(filter.SortBy, true)
 	searchQuery := fmt.Sprintf(`
-		SELECT t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri
+		SELECT t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri, COALESCE(t.files_json, '')
 		FROM torrents_fts f
 		JOIN torrents t ON t.rowid = f.rowid
 		%s
@@ -418,7 +423,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 	for rows.Next() {
 		var r TorrentRecord
 		var createdStr string
-		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err != nil {
+		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
 			return nil, 0, err
 		}
 		r.CreatedTime = parseDBTime(createdStr)

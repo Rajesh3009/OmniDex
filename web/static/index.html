@@ -8,13 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=7">
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
 </head>
 <body>
   <div class="container">
     <!-- Header -->
     <header class="header">
-      <div class="brand">
+      <div class="brand" id="brand-home-btn" role="button" tabindex="0" title="Return to OmniDex Homepage">
         <div class="logo-badge">⚡</div>
         <div class="brand-text">
           <div class="brand-title-wrap">
@@ -194,32 +194,38 @@
         <table class="torrent-table">
           <thead>
             <tr>
-              <th class="th-sortable" data-sort-key="name" style="width: 44%">
+              <th class="th-sortable" data-sort-key="name" style="width: 38%">
                 <div class="th-inner">
                   <span>Title & InfoHash</span>
                   <span class="sort-indicator" id="sort-icon-name">↕</span>
                 </div>
               </th>
-              <th class="th-sortable" data-sort-key="category" style="width: 12%">
+              <th class="th-sortable" data-sort-key="category" style="width: 10%">
                 <div class="th-inner">
                   <span>Category</span>
                   <span class="sort-indicator" id="sort-icon-category">↕</span>
                 </div>
               </th>
-              <th class="th-sortable" data-sort-key="size" style="width: 12%">
+              <th class="th-sortable" data-sort-key="size" style="width: 10%">
                 <div class="th-inner">
                   <span>Size</span>
                   <span class="sort-indicator" id="sort-icon-size">↕</span>
                 </div>
               </th>
-              <th style="width: 8%">Files</th>
-              <th class="th-sortable" data-sort-key="source" style="width: 10%">
+              <th style="width: 10%">Files</th>
+              <th class="th-sortable" data-sort-key="seeders" style="width: 11%">
+                <div class="th-inner">
+                  <span>Peers</span>
+                  <span class="sort-indicator" id="sort-icon-seeders">↕</span>
+                </div>
+              </th>
+              <th class="th-sortable" data-sort-key="source" style="width: 8%">
                 <div class="th-inner">
                   <span>Source</span>
                   <span class="sort-indicator" id="sort-icon-source">↕</span>
                 </div>
               </th>
-              <th class="th-sortable" data-sort-key="created" style="width: 14%">
+              <th class="th-sortable" data-sort-key="created" style="width: 13%">
                 <div class="th-inner">
                   <span>Date</span>
                   <span class="sort-indicator active" id="sort-icon-created">▼</span>
@@ -372,12 +378,25 @@
 
   <!-- Detail Modal -->
   <div class="modal-overlay" id="modal-details">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 780px;">
       <div class="modal-header">
-        <h2 id="detail-title">Torrent Details</h2>
+        <div style="overflow: hidden; text-overflow: ellipsis;">
+          <h2 id="detail-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Torrent Details</h2>
+        </div>
         <button class="modal-close" data-close="modal-details">&times;</button>
       </div>
-      <div class="form-group">
+
+      <!-- Quick Metadata Overview Bar -->
+      <div class="detail-overview-bar" id="detail-overview-bar">
+        <span class="meta-pill" id="detail-meta-size">💾 0 B</span>
+        <span class="meta-pill meta-seeders" id="detail-meta-seeders">▲ 0 Seeders</span>
+        <span class="meta-pill meta-leechers" id="detail-meta-leechers">▼ 0 Leechers</span>
+        <span class="meta-pill" id="detail-meta-category">Category</span>
+        <span class="meta-pill" id="detail-meta-source">Source</span>
+        <span class="meta-pill" id="detail-meta-date">Date</span>
+      </div>
+
+      <div class="form-group" style="margin-top: 14px;">
         <label>InfoHash</label>
         <div class="code-box" id="detail-hash"></div>
       </div>
@@ -385,18 +404,32 @@
         <label>Magnet URI</label>
         <div class="code-box" id="detail-magnet"></div>
       </div>
+
+      <!-- Files in Torrent Section -->
       <div class="form-group">
-        <label>Files Cataloged</label>
-        <div id="detail-files-list" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 8px;">
+        <div class="files-header-bar">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="margin-bottom: 0;">Files in Torrent (<span id="detail-files-count">0</span>)</label>
+            <span id="detail-files-loading" style="display: none; font-size: 0.75rem; color: var(--accent-cyan);">Loading files...</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="detail-files-filter" class="form-input files-search-input" placeholder="Filter files (e.g. .mp4, .srt)...">
+            <button id="btn-copy-files" class="btn btn-secondary btn-sm-action" title="Copy file list to clipboard">📋 Copy List</button>
+          </div>
+        </div>
+        <div id="detail-files-list" class="file-list-scrollbox">
+          <!-- Dynamically populated files -->
         </div>
       </div>
-      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;">
+        <button id="btn-copy-magnet" class="btn btn-secondary">Copy Magnet 🔗</button>
         <a id="detail-magnet-link" href="#" class="btn btn-primary">Open Magnet 🧲</a>
         <button class="btn btn-secondary" data-close="modal-details">Close</button>
       </div>
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=8"></script>
+  <script src="/static/js/app.js?v=9"></script>
 </body>
 </html>
