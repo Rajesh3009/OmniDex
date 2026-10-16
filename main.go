@@ -81,8 +81,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Torznab endpoint
+	// Torznab endpoints (supports exact, trailing slash, /api suffix for Prowlarr/Radarr/Sonarr, and root /api)
 	mux.HandleFunc("/api/v1/torznab", srv.torznab.HandleTorznab)
+	mux.HandleFunc("/api/v1/torznab/", srv.torznab.HandleTorznab)
+	mux.HandleFunc("/torznab", srv.torznab.HandleTorznab)
+	mux.HandleFunc("/torznab/", srv.torznab.HandleTorznab)
+	mux.HandleFunc("/api", srv.torznab.HandleTorznab)
 
 	// REST APIs for UI
 	mux.HandleFunc("/api/v1/search", srv.handleSearch)

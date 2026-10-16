@@ -17,15 +17,13 @@ type Server struct {
 	baseURL string
 }
 
-func NewServer(store *db.Store, apiKey, baseURL string) *Server {
+func NewServer(store *db.Store, apiKey string, baseURL string) *Server {
 	return &Server{
 		store:   store,
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
 	}
 }
-
-// XML Data Structures for Torznab Specification
 
 type TorznabAttr struct {
 	XMLName xml.Name `xml:"torznab:attr"`
@@ -88,9 +86,15 @@ type CapsSearchType struct {
 	SupportedParams string `xml:"supportedParams,attr"`
 }
 
-type CapsCategory struct {
+type CapsSubCat struct {
 	ID   int    `xml:"id,attr"`
 	Name string `xml:"name,attr"`
+}
+
+type CapsCategory struct {
+	ID     int          `xml:"id,attr"`
+	Name   string       `xml:"name,attr"`
+	SubCat []CapsSubCat `xml:"subcat,omitempty"`
 }
 
 type CapsRoot struct {
@@ -108,10 +112,19 @@ func (s *Server) HandleTorznab(w http.ResponseWriter, r *http.Request) {
 	if s.apiKey != "" {
 		providedKey := query.Get("apikey")
 		if providedKey == "" {
+			providedKey = query.Get("apiKey")
+		}
+		if providedKey == "" {
+			providedKey = query.Get("api_key")
+		}
+		if providedKey == "" {
 			providedKey = r.Header.Get("X-Api-Key")
 		}
+		if providedKey == "" {
+			providedKey = r.Header.Get("X-API-KEY")
+		}
 		if providedKey != s.apiKey {
-			http.Error(w, "Unauthorized: Invalid apikey", http.StatusUnauthorized)
+			s.handleError(w, 100, "Incorrect user credentials")
 			return
 		}
 	}
@@ -164,12 +177,61 @@ func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		Categories: []CapsCategory{
-			{ID: 2000, Name: "Movies"},
-			{ID: 5000, Name: "TV"},
-			{ID: 3000, Name: "Audio"},
-			{ID: 4000, Name: "PC"},
-			{ID: 7000, Name: "Books"},
-			{ID: 8000, Name: "Other"},
+			{
+				ID: 2000, Name: "Movies",
+				SubCat: []CapsSubCat{
+					{ID: 2010, Name: "Foreign"},
+					{ID: 2020, Name: "Other"},
+					{ID: 2030, Name: "SD"},
+					{ID: 2040, Name: "HD"},
+					{ID: 2045, Name: "UHD"},
+					{ID: 2050, Name: "BluRay"},
+				},
+			},
+			{
+				ID: 5000, Name: "TV",
+				SubCat: []CapsSubCat{
+					{ID: 5010, Name: "WEB-DL"},
+					{ID: 5020, Name: "Foreign"},
+					{ID: 5030, Name: "SD"},
+					{ID: 5040, Name: "HD"},
+					{ID: 5045, Name: "UHD"},
+					{ID: 5070, Name: "Anime"},
+					{ID: 5080, Name: "Documentary"},
+				},
+			},
+			{
+				ID: 3000, Name: "Audio",
+				SubCat: []CapsSubCat{
+					{ID: 3010, Name: "MP3"},
+					{ID: 3020, Name: "Video"},
+					{ID: 3030, Name: "Audiobook"},
+					{ID: 3040, Name: "Lossless"},
+				},
+			},
+			{
+				ID: 4000, Name: "PC",
+				SubCat: []CapsSubCat{
+					{ID: 4010, Name: "0day"},
+					{ID: 4020, Name: "ISO"},
+					{ID: 4030, Name: "Mac"},
+					{ID: 4050, Name: "Games"},
+				},
+			},
+			{
+				ID: 7000, Name: "Books",
+				SubCat: []CapsSubCat{
+					{ID: 7010, Name: "Magazines"},
+					{ID: 7020, Name: "EBook"},
+					{ID: 7030, Name: "Comics"},
+				},
+			},
+			{
+				ID: 8000, Name: "Other",
+				SubCat: []CapsSubCat{
+					{ID: 8010, Name: "Misc"},
+				},
+			},
 		},
 	}
 
@@ -181,7 +243,21 @@ func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	qParams := r.URL.Query()
-	qText := qParams.Get("q")
+	qText := strings.TrimSpace(qParams.Get("q"))
+
+	// Expand tvsearch season/episode if provided
+	season := qParams.Get("season")
+	ep := qParams.Get("ep")
+	if season != "" {
+		sNum, _ := strconv.Atoi(season)
+		if ep != "" {
+			eNum, _ := strconv.Atoi(ep)
+			qText = strings.TrimSpace(fmt.Sprintf("%s S%02dE%02d", qText, sNum, eNum))
+		} else {
+			qText = strings.TrimSpace(fmt.Sprintf("%s S%02d", qText, sNum))
+		}
+	}
+
 	limit, _ := strconv.Atoi(qParams.Get("limit"))
 	offset, _ := strconv.Atoi(qParams.Get("offset"))
 
@@ -192,7 +268,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
-	torrents, _, err := s.store.Search(qText, limit, offset)
+	catFilter := mapTorznabToInternalCategory(qParams.Get("cat"))
+
+	filter := db.SearchFilter{
+		Query:    qText,
+		Category: catFilter,
+		Limit:    limit,
+		Offset:   offset,
+		SortBy:   "created_desc",
+	}
+
+	torrents, _, err := s.store.SearchWithFilter(filter)
 	if err != nil {
 		s.handleError(w, 900, "Internal search error: "+err.Error())
 		return
@@ -209,7 +295,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		item := Item{
 			Title:    t.Name,
 			GUID:     t.InfoHash,
-			Comments: fmt.Sprintf("%s/torrent/%s", s.baseURL, t.InfoHash),
+			Comments: fmt.Sprintf("%s/#%s", s.baseURL, t.InfoHash),
 			PubDate:  t.CreatedTime.Format(time.RFC1123Z),
 			Size:     t.Size,
 			Link:     magnet,
@@ -261,6 +347,8 @@ func mapCategoryToTorznab(cat string) int {
 		return 2000
 	case "tv", "series":
 		return 5000
+	case "video":
+		return 2000
 	case "audio", "music":
 		return 3000
 	case "pc", "software":
@@ -270,4 +358,25 @@ func mapCategoryToTorznab(cat string) int {
 	default:
 		return 8000
 	}
+}
+
+func mapTorznabToInternalCategory(cat string) string {
+	if cat == "" {
+		return ""
+	}
+	parts := strings.Split(cat, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		switch {
+		case strings.HasPrefix(p, "2") || strings.HasPrefix(p, "5"):
+			return "Video"
+		case strings.HasPrefix(p, "3"):
+			return "Audio"
+		case strings.HasPrefix(p, "4"):
+			return "Software"
+		case strings.HasPrefix(p, "7"):
+			return "Books"
+		}
+	}
+	return ""
 }
