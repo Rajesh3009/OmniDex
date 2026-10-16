@@ -396,6 +396,21 @@ async function loadStats() {
     if (dbSizeEl && data.db.db_size_bytes !== undefined) {
       dbSizeEl.textContent = formatBytes(data.db.db_size_bytes);
     }
+
+    const ramEl = document.getElementById('stat-ram-usage');
+    const ramSubEl = document.getElementById('stat-ram-sub');
+    if (ramEl && data.memory) {
+      const mem = data.memory;
+      const displayRam = mem.rss_bytes || mem.alloc_bytes;
+      ramEl.textContent = formatBytes(displayRam);
+      if (ramSubEl) {
+        ramSubEl.textContent = `${formatBytes(mem.alloc_bytes)} heap · ${formatBytes(mem.sys_bytes)} OS`;
+        const card = ramEl.closest('.stat-card');
+        if (card) {
+          card.title = `Working Set (RSS): ${formatBytes(mem.rss_bytes)}\nGo Heap Allocated: ${formatBytes(mem.alloc_bytes)}\nOS Virtual Sys: ${formatBytes(mem.sys_bytes)}\nGoroutines: ${mem.num_goroutine}\nGC Cycles: ${mem.num_gc}`;
+        }
+      }
+    }
   } catch (e) {
     console.error('Stats error:', e);
   }

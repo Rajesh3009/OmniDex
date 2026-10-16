@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=3">
+  <link rel="stylesheet" href="/static/css/style.css?v=4">
 </head>
 <body>
   <div class="container">
@@ -60,6 +60,11 @@
         <span class="stat-label">Database On Disk</span>
         <span class="stat-value" id="stat-db-size">0 B</span>
         <span class="stat-sub" id="stat-db-info">SQLite WAL + FTS5</span>
+      </div>
+      <div class="stat-card" style="--card-color: #ec4899">
+        <span class="stat-label">RAM Usage</span>
+        <span class="stat-value" id="stat-ram-usage">0 MB</span>
+        <span class="stat-sub" id="stat-ram-sub">0 MB heap · 0 MB OS</span>
       </div>
     </section>
 
@@ -383,6 +388,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=3"></script>
+  <script src="/static/js/app.js?v=4"></script>
 </body>
 </html>

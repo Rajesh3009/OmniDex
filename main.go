@@ -17,6 +17,7 @@ import (
 	"local-indexer/internal/db"
 	"local-indexer/internal/dhtcrawler"
 	"local-indexer/internal/prowlarr"
+	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
 )
 
@@ -225,10 +226,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if s.crawler != nil {
 		crawlerMetrics = s.crawler.Metrics()
 	}
+	memStats := sysinfo.GetMemoryStats()
 
 	resp := map[string]any{
-		"db":  dbStats,
-		"dht": crawlerMetrics,
+		"db":     dbStats,
+		"dht":    crawlerMetrics,
+		"memory": memStats,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
