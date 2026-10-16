@@ -21,6 +21,8 @@ import (
 	"local-indexer/internal/torznab"
 )
 
+const Version = "1.0.0"
+
 //go:embed web/static/*
 var staticFS embed.FS
 
@@ -116,7 +118,7 @@ func main() {
 
 	go func() {
 		log.Printf("=================================================================")
-		log.Printf("⚡ Local Torrent Indexer & Torznab Bridge is running!")
+		log.Printf("⚡ Local Torrent Indexer & Torznab Bridge v%s is running!", Version)
 		log.Printf("🌐 Web Dashboard:   http://localhost:%d", cfg.WebPort)
 		log.Printf("📡 Torznab Endpoint: http://localhost:%d/api/v1/torznab?apikey=%s", cfg.WebPort, cfg.TorznabAPIKey)
 		log.Printf("💾 Database:         %s (FTS5 enabled)", cfg.DBPath)
@@ -229,9 +231,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	memStats := sysinfo.GetMemoryStats()
 
 	resp := map[string]any{
-		"db":     dbStats,
-		"dht":    crawlerMetrics,
-		"memory": memStats,
+		"version": Version,
+		"db":      dbStats,
+		"dht":     crawlerMetrics,
+		"memory":  memStats,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

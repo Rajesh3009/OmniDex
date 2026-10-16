@@ -1,5 +1,8 @@
 # Local Torrent Indexer & Hybrid Prowlarr Bridge
 
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](file:///d:/Projects/Web/torrent_indexer/main.go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](file:///d:/Projects/Web/torrent_indexer/LICENSE)
+
 A lightweight, high-performance personal torrent indexer daemon and Web UI running on Go and embedded SQLite (FTS5).
 
 ## ✨ Features
@@ -64,3 +67,9 @@ The application automatically creates `config.json` with sensible defaults:
   "prowlarr_api_key": ""
 }
 ```
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE) - see the [LICENSE](LICENSE) file for details.
