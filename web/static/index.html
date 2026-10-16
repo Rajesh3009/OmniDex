@@ -22,6 +22,9 @@
         </div>
       </div>
       <div class="header-actions">
+        <button id="btn-show-graph" class="nav-pill" style="border-color: var(--accent-cyan); color: #fff; background: rgba(6, 182, 212, 0.15)">
+          🌐 DHT Peer Graph
+        </button>
         <button id="btn-show-torznab" class="nav-pill">
           📡 Torznab Endpoint
         </button>
@@ -49,9 +52,9 @@
         <span class="stat-sub">Aggregated external</span>
       </div>
       <div class="stat-card" style="--card-color: var(--accent-green)">
-        <span class="stat-label">DHT Wire Status</span>
-        <span class="stat-value" id="stat-active-resolving">0</span>
-        <span class="stat-sub" id="stat-queue-len">Active wire peers / 0 queued</span>
+        <span class="stat-label">DHT Routing Table</span>
+        <span class="stat-value" id="stat-dht-nodes">0 Nodes</span>
+        <span class="stat-sub" id="stat-queue-len">0 good nodes in routing table</span>
       </div>
     </section>
 
@@ -173,6 +176,40 @@
           <button type="submit" class="btn btn-primary">Save Settings</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- DHT Peer Graph Modal -->
+  <div class="modal-overlay" id="modal-graph">
+    <div class="modal-content" style="max-width: 900px; width: 95%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h2>🌐 DHT Peer Topology & Routing Graph</h2>
+          <span class="badge badge-dht" id="graph-peer-count">0 Nodes connected</span>
+        </div>
+        <button class="modal-close" data-close="modal-graph">&times;</button>
+      </div>
+
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">
+        Live visualization of routing table nodes and KRPC wire connections discovered through global BitTorrent bootstrapping.
+      </p>
+
+      <div style="position: relative; width: 100%; height: 480px; background: rgba(5, 8, 15, 0.9); border-radius: var(--radius-md); border: 1px solid var(--border-color); overflow: hidden;">
+        <canvas id="dht-canvas" width="850" height="480" style="width: 100%; height: 100%; display: block;"></canvas>
+        <div id="graph-legend" style="position: absolute; bottom: 12px; left: 14px; display: flex; gap: 14px; font-size: 0.75rem; background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+          <span style="color: #06b6d4">● Local Node (Center)</span>
+          <span style="color: #a855f7">● Discovered DHT Peers</span>
+          <span style="color: #10b981">● Active Wire Resolvers</span>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+        <span style="font-size: 0.8rem; color: var(--text-dim);" id="graph-status-text">Physics simulation active</span>
+        <div style="display: flex; gap: 10px;">
+          <button id="btn-refresh-graph" class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem;">🔄 Refresh Topology</button>
+          <button class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem;" data-close="modal-graph">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 

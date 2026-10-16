@@ -39,6 +39,27 @@ type Metrics struct {
 	MetadataFailed    int64 `json:"metadata_failed"`
 	ActiveResolving   int64 `json:"active_resolving"`
 	QueueLen          int   `json:"queue_len"`
+	GoodNodes         int   `json:"good_nodes"`
+	TotalNodes        int   `json:"total_nodes"`
+}
+
+type GraphNode struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Type     string `json:"type"` // "local", "router", "peer", "torrent"
+	Addr     string `json:"addr,omitempty"`
+	Distance int    `json:"distance,omitempty"`
+}
+
+type GraphLink struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type"` // "routing", "announce", "resolving"
+}
+
+type DHTGraphData struct {
+	Nodes []GraphNode `json:"nodes"`
+	Links []GraphLink `json:"links"`
 }
 
 type Crawler struct {
@@ -158,11 +179,11 @@ func (c *Crawler) Start() {
 		}
 	}()
 
-	// Continuous random walk traversal to keep our node active in everyone's routing table
+	// Active DHT Infohash Discovery Loop:
+	// Uses BEP 51 (sample_infohashes) + find_node random walk traversal
 	go func() {
-		// Wait a bit for initial bootstrap
-		time.Sleep(5 * time.Second)
-		ticker := time.NewTicker(3 * time.Second)
+		time.Sleep(3 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -175,13 +196,48 @@ func (c *Crawler) Start() {
 					_, _ = c.dhtServer.Bootstrap()
 					continue
 				}
-				// Query a random target to stimulate DHT find_node and get_peers traffic
-				var randTarget [20]byte
-				_, _ = rand.Read(randTarget[:])
-				for i := 0; i < len(nodes) && i < 8; i++ {
+
+				// Sample across up to 15 nodes in the table each tick
+				for i := 0; i < len(nodes) && i < 15; i++ {
+					node := nodes[i]
+					nodeAddr := dht.NewAddr(node.Addr.UDP())
+
+					var randTarget [20]byte
+					_, _ = rand.Read(randTarget[:])
 					targetID := int160.FromByteArray(randTarget)
-					addr := dht.NewAddr(nodes[i].Addr.UDP())
-					c.dhtServer.FindNode(addr, targetID, dht.QueryRateLimiting{NotAny: true})
+
+					// 1. Send find_node to discover further nodes and insert into table
+					go func(addr dht.Addr, target int160.T) {
+						c.dhtServer.FindNode(addr, target, dht.QueryRateLimiting{NotAny: true})
+					}(nodeAddr, targetID)
+
+					// 2. Send BEP 51 sample_infohashes query directly to harvest torrent hashes
+					go func(addr dht.Addr, target [20]byte, peerIP net.IP, peerPort int) {
+						ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
+						defer cancel()
+
+						res := c.dhtServer.Query(ctx, addr, "sample_infohashes", dht.QueryInput{
+							MsgArgs: krpc.MsgArgs{
+								Target: target,
+							},
+							RateLimiting: dht.QueryRateLimiting{NotAny: true},
+						})
+
+						if res.Err == nil && res.Reply.R != nil {
+							// Ingest new nodes discovered from response
+							for _, n := range res.Reply.R.Nodes {
+								_ = c.dhtServer.AddNode(n)
+							}
+
+							// Ingest all sampled infohashes returned by the peer
+							if res.Reply.R.Samples != nil {
+								for _, sample := range *res.Reply.R.Samples {
+									atomic.AddInt64(&c.metrics.AnnouncesReceived, 1)
+									c.enqueue(metainfo.Hash(sample), peerIP, peerPort)
+								}
+							}
+						}
+					}(nodeAddr, randTarget, node.Addr.IP, node.Addr.Port)
 				}
 			}
 		}
@@ -277,6 +333,16 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 			},
 		})
 	}
+
+	// Add popular high-speed open public trackers to help locate wire peers immediately
+	t.AddTrackers([][]string{
+		{"udp://tracker.opentrackr.org:1337/announce"},
+		{"udp://open.demonii.com:1337/announce"},
+		{"udp://open.stealth.si:80/announce"},
+		{"udp://tracker.torrent.eu.org:451/announce"},
+		{"udp://explodie.org:6969/announce"},
+		{"udp://tracker.moeking.me:6969/announce"},
+	})
 
 	// Wait for metadata (BEP 9 / BEP 10 exchange with wire peers)
 	timeoutCtx, cancel := context.WithTimeout(c.ctx, 45*time.Second)
@@ -384,5 +450,67 @@ func contains(a, b string) bool {
 func (c *Crawler) Metrics() Metrics {
 	m := c.metrics
 	m.QueueLen = len(c.workChan)
+	if c.dhtServer != nil {
+		stats := c.dhtServer.Stats()
+		m.GoodNodes = stats.GoodNodes
+		m.TotalNodes = stats.Nodes
+	}
 	return m
 }
+
+func (c *Crawler) GetGraphData() DHTGraphData {
+	data := DHTGraphData{
+		Nodes: make([]GraphNode, 0),
+		Links: make([]GraphLink, 0),
+	}
+
+	if c.dhtServer == nil {
+		return data
+	}
+
+	srvID := c.dhtServer.ID()
+	localID := hex.EncodeToString(srvID[:])
+	localShort := localID
+	if len(localShort) > 8 {
+		localShort = localShort[:8]
+	}
+
+	// 1. Central Local Node
+	data.Nodes = append(data.Nodes, GraphNode{
+		ID:    localID,
+		Label: "Local Node (" + localShort + ")",
+		Type:  "local",
+		Addr:  c.dhtServer.Addr().String(),
+	})
+
+	// 2. Discovered DHT Routing Table Nodes
+	nodes := c.dhtServer.Nodes()
+	maxRender := 50
+	for i, n := range nodes {
+		if i >= maxRender {
+			break
+		}
+		nodeHex := hex.EncodeToString(n.ID[:])
+		short := nodeHex
+		if len(short) > 6 {
+			short = short[:6]
+		}
+		addrStr := n.Addr.String()
+
+		data.Nodes = append(data.Nodes, GraphNode{
+			ID:    nodeHex,
+			Label: short + "@" + addrStr,
+			Type:  "peer",
+			Addr:  addrStr,
+		})
+
+		data.Links = append(data.Links, GraphLink{
+			Source: localID,
+			Target: nodeHex,
+			Type:   "routing",
+		})
+	}
+
+	return data
+}
+

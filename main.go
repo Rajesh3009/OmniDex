@@ -84,6 +84,7 @@ func main() {
 	// REST APIs for UI
 	mux.HandleFunc("/api/v1/search", srv.handleSearch)
 	mux.HandleFunc("/api/v1/stats", srv.handleStats)
+	mux.HandleFunc("/api/v1/dht/graph", srv.handleDHTGraph)
 	mux.HandleFunc("/api/v1/config", srv.handleConfig)
 
 	// Static UI assets
@@ -181,6 +182,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleDHTGraph(w http.ResponseWriter, r *http.Request) {
+	var graph dhtcrawler.DHTGraphData
+	if s.crawler != nil {
+		graph = s.crawler.GetGraphData()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(graph)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
