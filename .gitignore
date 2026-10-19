@@ -4,3 +4,5 @@ indexer.db-shm
 indexer.db-wal
 config.json
 *.exe
+omnidex
+dist/
