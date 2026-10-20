@@ -547,6 +547,10 @@ async function triggerBackgroundProwlarrSearch(query) {
     } else {
       indicator.className = 'prowlarr-status-pill dim';
       indicator.textContent = data.count > 0 ? `✓ Prowlarr checked (${data.count} already indexed)` : `✓ Prowlarr checked (no external results)`;
+      if (data.count > 0) {
+        // In case items were indexed in background or previously, refresh results list
+        performSearch(undefined, false);
+      }
       setTimeout(() => {
         if (currentSeq === prowlarrSearchSeq) {
           indicator.style.display = 'none';
@@ -566,7 +570,8 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
   const tbody = document.getElementById('torrents-tbody');
   const emptyState = document.getElementById('empty-state');
   const checkProwlarr = document.getElementById('check-prowlarr-live');
-  const queryProwlarr = checkProwlarr ? checkProwlarr.checked : false;
+  // Default to true when checkbox is absent — always query Prowlarr in the background
+  const queryProwlarr = checkProwlarr ? checkProwlarr.checked : true;
 
   if (overrideQuery !== undefined) {
     filterState.query = overrideQuery;
