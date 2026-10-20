@@ -2,11 +2,12 @@ package dhtcrawler
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -185,12 +186,26 @@ func (c *Crawler) Start() {
 	go func() {
 		time.Sleep(3 * time.Second)
 		ticker := time.NewTicker(2 * time.Second)
+		rebootstrapTicker := time.NewTicker(10 * time.Minute) // Fix #1: periodic re-bootstrap to refresh stale routing table
 		defer ticker.Stop()
+		defer rebootstrapTicker.Stop()
 
 		for {
 			select {
 			case <-c.ctx.Done():
 				return
+			case <-rebootstrapTicker.C:
+				// Periodically re-insert ourselves into the DHT regardless of node count.
+				// Over time stale nodes stop responding; re-bootstrapping renews the routing table.
+				log.Println("[DHT Crawler] Periodic re-bootstrap to refresh routing table...")
+				go func() {
+					stats, err := c.dhtServer.Bootstrap()
+					if err != nil {
+						log.Printf("[DHT Crawler] Re-bootstrap note: %v", err)
+					} else {
+						log.Printf("[DHT Crawler] Re-bootstrap done. Responses: %d", stats.NumResponses)
+					}
+				}()
 			case <-ticker.C:
 				nodes := c.dhtServer.Nodes()
 				if len(nodes) == 0 {
@@ -198,13 +213,17 @@ func (c *Crawler) Start() {
 					continue
 				}
 
-				// Sample across up to 15 nodes in the table each tick
+				// Fix #2: Shuffle nodes so we don't always query the same top-15 stale entries.
+				// Without shuffling, the crawler exhausts the same stale peers every tick.
+				rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
+
+				// Sample across up to 15 randomly selected nodes in the table each tick
 				for i := 0; i < len(nodes) && i < 15; i++ {
 					node := nodes[i]
 					nodeAddr := dht.NewAddr(node.Addr.UDP())
 
 					var randTarget [20]byte
-					_, _ = rand.Read(randTarget[:])
+					_, _ = crand.Read(randTarget[:])
 					targetID := int160.FromByteArray(randTarget)
 
 					// 1. Send find_node to discover further nodes and insert into table
@@ -248,9 +267,11 @@ func (c *Crawler) Start() {
 		go c.worker(i)
 	}
 
-	// Cache pruning routine (prevents unbounded memory growth)
+	// Cache pruning routine (prevents unbounded memory growth).
+	// Fix #4: run every 10 minutes instead of 30 to reduce GC pressure which
+	// can delay the torrent client's peer connection goroutines.
 	go func() {
-		ticker := time.NewTicker(30 * time.Minute)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
@@ -260,7 +281,7 @@ func (c *Crawler) Start() {
 				now := time.Now()
 				c.visited.Range(func(key, val any) bool {
 					t, ok := val.(time.Time)
-					if ok && now.Sub(t) > 2*time.Hour {
+					if ok && now.Sub(t) > 1*time.Hour {
 						c.visited.Delete(key)
 					}
 					return true
@@ -345,8 +366,10 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 		{"udp://tracker.moeking.me:6969/announce"},
 	})
 
-	// Wait for metadata (BEP 9 / BEP 10 exchange with wire peers)
-	timeoutCtx, cancel := context.WithTimeout(c.ctx, 45*time.Second)
+	// Wait for metadata (BEP 9 / BEP 10 exchange with wire peers).
+	// Fix #3: 20s timeout instead of 45s. Holding 15 workers × 45s = 675s worth of
+	// open TCP connections saturates OS ports and starves the DHT UDP socket.
+	timeoutCtx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
 	defer cancel()
 
 	select {
