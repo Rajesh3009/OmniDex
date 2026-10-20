@@ -136,11 +136,11 @@ All compiled binaries will be output cleanly into the `dist/` directory.
 
 ### 2. Access Web Dashboard
 Open your browser at:
-[http://localhost:8080](http://localhost:8080)
+[http://localhost:8686](http://localhost:8686)
 
 ### 3. Setup in Prowlarr / Radarr / Sonarr
 - **Indexer Type:** Torznab (Generic)
-- **URL:** `http://localhost:8080/api/v1/torznab`
+- **URL:** `http://localhost:8686/api/v1/torznab`
 - **API Key:** `local-indexer-secret-key` (or your custom key configured in Settings)
 - **Categories:** 2000 (Movies), 5000 (TV), 3000 (Audio), 4000 (PC), 7000 (Books), 8000 (Other)
 
@@ -151,7 +151,7 @@ Open your browser at:
 The application automatically creates `config.json` with sensible defaults:
 ```json
 {
-  "web_port": 8080,
+  "web_port": 8686,
   "dht_listen_addr": ":6881",
   "dht_workers": 15,
   "max_torrent_peers": 20,

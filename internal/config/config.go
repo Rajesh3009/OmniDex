@@ -18,7 +18,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		WebPort:         8080,
+		WebPort:         8686,
 		DHTListenAddr:   ":6881",
 		DHTWorkers:      15,
 		MaxTorrentPeers: 20,
