@@ -1,6 +1,8 @@
 package prowlarr
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -99,15 +101,44 @@ func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 
 	magnet := item.MagnetURL
 	hash := strings.ToLower(item.InfoHash)
+
+	// Extract hash from magnet URI if InfoHash field was empty
 	if hash == "" && strings.Contains(magnet, "btih:") {
-		// extract from magnet
 		parts := strings.Split(magnet, "btih:")
 		if len(parts) > 1 {
-			hash = strings.Split(parts[1], "&")[0]
+			hash = strings.ToLower(strings.Split(parts[1], "&")[0])
 		}
 	}
+
+	// Build magnet from hash + title if we have a hash but no magnet
 	if magnet == "" && hash != "" {
 		magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hash, url.QueryEscape(item.Title))
+	}
+
+	// Fallback: synthesise a deterministic hash from the Guid so that results
+	// from NZB/RSS-only indexers (which have no InfoHash) are not silently
+	// dropped. We SHA1 the Guid and prefix it with "prowlarr-" in the magnet
+	// URI so it is clearly identified as a non-magnet source.
+	if hash == "" && item.Guid != "" {
+		sum := sha1.Sum([]byte(item.Guid))
+		hash = hex.EncodeToString(sum[:])
+	}
+	if hash == "" && item.DownloadURL != "" {
+		sum := sha1.Sum([]byte(item.DownloadURL))
+		hash = hex.EncodeToString(sum[:])
+	}
+
+	// Use DownloadURL as the link when no magnet is available
+	if magnet == "" && item.DownloadURL != "" {
+		magnet = item.DownloadURL
+	}
+
+	// Populate FilesJSON with the title so FTS picks it up correctly
+	filesJSON := ""
+	if item.Title != "" {
+		if b, err := json.Marshal([]string{item.Title}); err == nil {
+			filesJSON = string(b)
+		}
 	}
 
 	return db.TorrentRecord{
@@ -115,6 +146,7 @@ func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 		Name:        item.Title,
 		Size:        item.Size,
 		FileCount:   1,
+		FilesJSON:   filesJSON,
 		CreatedTime: item.PublishDate,
 		Source:      "prowlarr",
 		Seeders:     item.Seeders,

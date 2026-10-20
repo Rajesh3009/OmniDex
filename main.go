@@ -506,13 +506,15 @@ func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
 	addedCount := 0
 	for _, item := range prowlResults {
 		rec := item.ToRecord()
-		if rec.InfoHash != "" {
-			exists, _ := s.store.Exists(rec.InfoHash)
-			if !exists {
-				addedCount++
-			}
-			_ = s.store.UpsertTorrent(&rec)
+		if rec.InfoHash == "" || rec.Name == "" {
+			// Skip truly empty/unusable records (no guid, no download URL, no title)
+			continue
 		}
+		exists, _ := s.store.Exists(rec.InfoHash)
+		if !exists {
+			addedCount++
+		}
+		_ = s.store.UpsertTorrent(&rec)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
