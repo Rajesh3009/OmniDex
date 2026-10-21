@@ -556,13 +556,16 @@ function closeModal(id) {
   }
 }
 
+let lastKnownTorrentCount = null;
+
 async function loadStats() {
   try {
     const res = await fetch('/api/v1/stats');
     if (!res.ok) return;
     const data = await res.json();
 
-    document.getElementById('stat-total-torrents').textContent = data.db.total_torrents.toLocaleString();
+    const totalTorrents = data.db.total_torrents;
+    document.getElementById('stat-total-torrents').textContent = totalTorrents.toLocaleString();
     document.getElementById('stat-total-size').textContent = formatBytes(data.db.total_size_bytes) + ' cataloged';
     document.getElementById('stat-dht-count').textContent = data.db.dht_count.toLocaleString();
     document.getElementById('stat-dht-announces').textContent = `${data.dht.announces_received.toLocaleString()} KRPC announces`;
@@ -597,6 +600,19 @@ async function loadStats() {
         }
       }
     }
+
+    // Dynamic list update: If new torrents have been indexed (via DHT or Prowlarr)
+    // and user is viewing page 1 with no active modal or editing in progress, refresh page 1 silently!
+    if (lastKnownTorrentCount !== null && totalTorrents !== lastKnownTorrentCount) {
+      const isModalOpen = !!document.querySelector('.modal-overlay.active');
+      const searchInput = document.getElementById('search-input');
+      const isTyping = searchInput && document.activeElement === searchInput;
+      if (filterState.page === 1 && !isModalOpen && !isTyping) {
+        // Silently update page 1 list without disrupting user
+        performSearch(undefined, false, true);
+      }
+    }
+    lastKnownTorrentCount = totalTorrents;
   } catch (e) {
     console.error('Stats error:', e);
   }
@@ -677,8 +693,10 @@ async function triggerBackgroundProwlarrSearch(query) {
     if (data.added > 0) {
       indicator.className = 'prowlarr-status-pill success';
       indicator.textContent = `✓ Prowlarr added ${data.added} new torrent${data.added > 1 ? 's' : ''}`;
-      // Refresh local results to show the newly ingested items
-      performSearch(undefined, false);
+      // Refresh local results immediately to display newly ingested items in the table
+      if (filterState.query.trim().toLowerCase() === query.trim().toLowerCase()) {
+        performSearch(filterState.query, false);
+      }
       setTimeout(() => {
         if (currentSeq === prowlarrSearchSeq) {
           indicator.style.display = 'none';
@@ -687,9 +705,9 @@ async function triggerBackgroundProwlarrSearch(query) {
     } else {
       indicator.className = 'prowlarr-status-pill dim';
       indicator.textContent = data.count > 0 ? `✓ Prowlarr checked (${data.count} already indexed)` : `✓ Prowlarr checked (no external results)`;
-      if (data.count > 0) {
+      if (data.count > 0 && filterState.query.trim().toLowerCase() === query.trim().toLowerCase()) {
         // In case items were indexed in background or previously, refresh results list
-        performSearch(undefined, false);
+        performSearch(filterState.query, false);
       }
       setTimeout(() => {
         if (currentSeq === prowlarrSearchSeq) {
@@ -704,7 +722,7 @@ async function triggerBackgroundProwlarrSearch(query) {
   }
 }
 
-async function performSearch(overrideQuery, triggerProwlarr = true) {
+async function performSearch(overrideQuery, triggerProwlarr = true, silent = false) {
   const loading = document.getElementById('loading-spinner');
   const countText = document.getElementById('results-count-text');
   const tbody = document.getElementById('torrents-tbody');
@@ -717,7 +735,7 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
     filterState.query = overrideQuery;
   }
 
-  if (loading) loading.style.display = 'inline-block';
+  if (loading && !silent) loading.style.display = 'inline-block';
   renderActiveFilterBadges();
 
   try {
@@ -736,7 +754,8 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
       page: filterState.page.toString(),
       limit: filterState.limit.toString(),
       offset: ((filterState.page - 1) * filterState.limit).toString(),
-      prowlarr: 'false' // Local search is always non-blocking
+      prowlarr: 'false', // Local search is always non-blocking
+      _t: Date.now().toString()
     });
 
     const res = await fetch(`/api/v1/search?${params.toString()}`);
@@ -771,9 +790,9 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
     }
   } catch (err) {
     console.error('Search error:', err);
-    if (countText) countText.textContent = 'Error fetching search results';
+    if (countText && !silent) countText.textContent = 'Error fetching search results';
   } finally {
-    if (loading) loading.style.display = 'none';
+    if (loading && !silent) loading.style.display = 'none';
   }
 }
 
