@@ -24,7 +24,7 @@ import (
 	"local-indexer/internal/torznab"
 )
 
-const Version = "1.0.1"
+const Version = "1.1.0"
 
 //go:embed web/static/*
 var staticFS embed.FS
