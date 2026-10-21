@@ -39,6 +39,10 @@
    - Heuristic threat scoring against dangerous double extensions (e.g. `.mkv.exe`, `.mp4.scr`), executables disguised inside media/book categories, fake codec download instructions, locked password traps, and URL redirect scams.
    - Soft filtering protection: safely flags suspicious items with pulsing warning badges and risk percentages while cleanly suppressing them by default from Torznab/Search results (with an opt-in toggle to view suspicious items).
 
+8. **Dynamic RSS 2.0 & Atom Feeds Generator**
+   - Exposes standard RSS 2.0 (`/api/v1/feed/rss`) and Atom 1.0 (`/api/v1/feed/atom`) endpoints with BitTorrent enclosures.
+   - Supports all search query parameters, categories, resolutions, codecs, and qualities for automated syncing in qBittorrent, Deluge, Transmission, or RSS feed readers.
+
 ---
 
 ## 🚀 Getting Started

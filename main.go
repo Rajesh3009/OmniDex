@@ -18,6 +18,7 @@ import (
 	"local-indexer/internal/config"
 	"local-indexer/internal/db"
 	"local-indexer/internal/dhtcrawler"
+	"local-indexer/internal/feed"
 	"local-indexer/internal/prowlarr"
 	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
@@ -35,6 +36,7 @@ type Server struct {
 	crawler *dhtcrawler.Crawler
 	torznab *torznab.Server
 	prowl   *prowlarr.Client
+	feedGen *feed.Generator
 }
 
 func main() {
@@ -72,6 +74,9 @@ func main() {
 	// Initialize Prowlarr client
 	prowlClient := prowlarr.NewClient(cfg.ProwlarrURL, cfg.ProwlarrAPIKey)
 
+	// Initialize Dynamic Feed Generator
+	feedGen := feed.NewGenerator(store, baseURL)
+
 	srv := &Server{
 		cfg:     cfg,
 		cfgPath: cfgPath,
@@ -79,9 +84,17 @@ func main() {
 		crawler: crawler,
 		torznab: torznabServer,
 		prowl:   prowlClient,
+		feedGen: feedGen,
 	}
 
 	mux := http.NewServeMux()
+
+	// RSS 2.0 & Atom Feed Endpoints
+	mux.HandleFunc("/api/v1/feed/rss", srv.feedGen.HandleRSS)
+	mux.HandleFunc("/api/v1/feed", srv.feedGen.HandleRSS)
+	mux.HandleFunc("/rss", srv.feedGen.HandleRSS)
+	mux.HandleFunc("/api/v1/feed/atom", srv.feedGen.HandleAtom)
+	mux.HandleFunc("/atom", srv.feedGen.HandleAtom)
 
 	// Torznab endpoints (supports exact, trailing slash, /api suffix for Prowlarr/Radarr/Sonarr, and root /api)
 	mux.HandleFunc("/api/v1/torznab", srv.torznab.HandleTorznab)

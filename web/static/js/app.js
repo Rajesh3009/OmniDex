@@ -211,6 +211,15 @@ function initEventListeners() {
     fetchAndRenderGraph();
   });
 
+  document.getElementById('btn-show-feed')?.addEventListener('click', () => {
+    const origin = window.location.origin;
+    const rssEl = document.getElementById('feed-rss-url');
+    if (rssEl) rssEl.textContent = `${origin}/api/v1/feed/rss`;
+    const atomEl = document.getElementById('feed-atom-url');
+    if (atomEl) atomEl.textContent = `${origin}/api/v1/feed/atom`;
+    openModal('modal-feed');
+  });
+
   document.getElementById('btn-show-torznab').addEventListener('click', () => {
     openModal('modal-torznab');
   });

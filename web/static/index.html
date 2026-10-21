@@ -31,6 +31,9 @@
         <button id="btn-show-graph" class="nav-pill" style="border-color: var(--accent-cyan); color: #fff; background: rgba(6, 182, 212, 0.15)">
           🌐 DHT Peer Graph
         </button>
+        <button id="btn-show-feed" class="nav-pill" style="border-color: #f97316; color: #ffedd5; background: rgba(249, 115, 22, 0.15)">
+          🔔 RSS / Atom Feeds
+        </button>
         <button id="btn-show-torznab" class="nav-pill">
           📡 Torznab Endpoint
         </button>
@@ -321,6 +324,41 @@
         </div>
       </div>
     </main>
+  <!-- RSS / Atom Feed Modal -->
+  <div class="modal-overlay" id="modal-feed">
+    <div class="modal-content" style="max-width: 680px;">
+      <div class="modal-header">
+        <h2>🔔 Dynamic RSS & Atom Feeds</h2>
+        <button class="modal-close" data-close="modal-feed">&times;</button>
+      </div>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px;">
+        Subscribe to live updates with your favorite torrent client (qBittorrent, Deluge) or RSS reader. All search parameters, tags, and categories are supported as query parameters.
+      </p>
+
+      <div class="form-group">
+        <label>Standard RSS 2.0 Feed URL</label>
+        <div class="code-box" id="feed-rss-url">http://localhost:8686/api/v1/feed/rss</div>
+        <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">
+          Compatible with qBittorrent RSS Downloader, Transmission, Deluge, and Feedly.
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label>Atom 1.0 Feed URL (RFC 4287)</label>
+        <div class="code-box" id="feed-atom-url">http://localhost:8686/api/v1/feed/atom</div>
+      </div>
+
+      <div class="form-group">
+        <label>Dynamic Filtering Examples</label>
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.8rem;">
+          <div class="code-box" style="padding: 6px 10px;">/api/v1/feed/rss?category=Video&resolution=1080p&limit=50</div>
+          <div class="code-box" style="padding: 6px 10px;">/api/v1/feed/rss?q=cyberpunk&quality=WEB-DL</div>
+          <div class="code-box" style="padding: 6px 10px;">/api/v1/feed/atom?category=Software&codec=x265</div>
+        </div>
+      </div>
+
+      <button class="btn btn-secondary" style="width: 100%" data-close="modal-feed">Close</button>
+    </div>
   </div>
 
   <!-- Torznab Info Modal -->
