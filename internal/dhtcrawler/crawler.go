@@ -21,6 +21,7 @@ import (
 	"github.com/anacrolix/torrent/storage/disabled"
 
 	"local-indexer/internal/db"
+	"local-indexer/internal/metadata"
 )
 
 type AnnounceJob struct {
@@ -434,6 +435,14 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 		Category:    guessCategory(info.Name, fileList),
 		MagnetURI:   magnet,
 	}
+	tags := metadata.ExtractTags(info.Name, fileList)
+	rec.Resolution = tags.Resolution
+	rec.Codec = tags.Codec
+	rec.Quality = tags.Quality
+	rec.Audio = tags.Audio
+	rec.HDR = tags.HDR
+	rec.ReleaseGroup = tags.ReleaseGroup
+
 	if rec.FileCount == 0 {
 		rec.FileCount = 1
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"local-indexer/internal/db"
+	"local-indexer/internal/metadata"
 )
 
 type Client struct {
@@ -141,17 +142,25 @@ func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 		}
 	}
 
+	tags := metadata.ExtractTags(item.Title, nil)
+
 	return db.TorrentRecord{
-		InfoHash:    hash,
-		Name:        item.Title,
-		Size:        item.Size,
-		FileCount:   1,
-		FilesJSON:   filesJSON,
-		CreatedTime: item.PublishDate,
-		Source:      "prowlarr",
-		Seeders:     item.Seeders,
-		Leechers:    item.Leechers,
-		Category:    category,
-		MagnetURI:   magnet,
+		InfoHash:     hash,
+		Name:         item.Title,
+		Size:         item.Size,
+		FileCount:    1,
+		FilesJSON:    filesJSON,
+		CreatedTime:  item.PublishDate,
+		Source:       "prowlarr",
+		Seeders:      item.Seeders,
+		Leechers:     item.Leechers,
+		Category:     category,
+		MagnetURI:    magnet,
+		Resolution:   tags.Resolution,
+		Codec:        tags.Codec,
+		Quality:      tags.Quality,
+		Audio:        tags.Audio,
+		HDR:          tags.HDR,
+		ReleaseGroup: tags.ReleaseGroup,
 	}
 }

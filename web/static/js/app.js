@@ -6,6 +6,10 @@ const filterState = {
   query: '',
   category: 'all',
   source: 'all',
+  resolution: 'all',
+  codec: 'all',
+  quality: 'all',
+  releaseGroup: '',
   sizePreset: 'all',
   minSize: 0,
   maxSize: 0,
@@ -88,6 +92,36 @@ function initEventListeners() {
   if (sizeSelect) {
     sizeSelect.addEventListener('change', () => {
       setSizePreset(sizeSelect.value);
+      filterState.page = 1;
+      performSearch();
+    });
+  }
+
+  // Resolution selector
+  const resSelect = document.getElementById('filter-res');
+  if (resSelect) {
+    resSelect.addEventListener('change', () => {
+      filterState.resolution = resSelect.value;
+      filterState.page = 1;
+      performSearch();
+    });
+  }
+
+  // Codec selector
+  const codecSelect = document.getElementById('filter-codec');
+  if (codecSelect) {
+    codecSelect.addEventListener('change', () => {
+      filterState.codec = codecSelect.value;
+      filterState.page = 1;
+      performSearch();
+    });
+  }
+
+  // Quality selector
+  const qualSelect = document.getElementById('filter-quality');
+  if (qualSelect) {
+    qualSelect.addEventListener('change', () => {
+      filterState.quality = qualSelect.value;
       filterState.page = 1;
       performSearch();
     });
@@ -229,6 +263,26 @@ function setCategoryFilter(category) {
   performSearch();
 }
 
+function filterByTag(tagType, val) {
+  filterState.page = 1;
+  if (tagType === 'resolution') {
+    filterState.resolution = val;
+    const el = document.getElementById('filter-res');
+    if (el) el.value = val;
+  } else if (tagType === 'codec') {
+    filterState.codec = val;
+    const el = document.getElementById('filter-codec');
+    if (el) el.value = val;
+  } else if (tagType === 'quality') {
+    filterState.quality = val;
+    const el = document.getElementById('filter-quality');
+    if (el) el.value = val;
+  } else if (tagType === 'releaseGroup') {
+    filterState.releaseGroup = val;
+  }
+  performSearch();
+}
+
 function setSizePreset(preset) {
   filterState.sizePreset = preset;
   switch (preset) {
@@ -328,6 +382,10 @@ function resetFilters() {
   filterState.query = '';
   filterState.category = 'all';
   filterState.source = 'all';
+  filterState.resolution = 'all';
+  filterState.codec = 'all';
+  filterState.quality = 'all';
+  filterState.releaseGroup = '';
   filterState.sort = 'created_desc';
   filterState.page = 1;
   filterState.limit = 20;
@@ -338,6 +396,12 @@ function resetFilters() {
   if (filterSource) filterSource.value = 'all';
   const filterSize = document.getElementById('filter-size');
   if (filterSize) filterSize.value = 'all';
+  const filterRes = document.getElementById('filter-res');
+  if (filterRes) filterRes.value = 'all';
+  const filterCodec = document.getElementById('filter-codec');
+  if (filterCodec) filterCodec.value = 'all';
+  const filterQual = document.getElementById('filter-quality');
+  if (filterQual) filterQual.value = 'all';
   const sortSelect = document.getElementById('sort-select');
   if (sortSelect) sortSelect.value = 'created_desc';
   const limitSelect = document.getElementById('select-page-limit');
@@ -374,6 +438,40 @@ function renderActiveFilterBadges() {
     createBadge(container, `Source: ${filterState.source === 'dht' ? 'DHT Wire' : 'Prowlarr'}`, () => {
       document.getElementById('filter-source').value = 'all';
       filterState.source = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.resolution !== 'all') {
+    createBadge(container, `Res: ${filterState.resolution}`, () => {
+      const el = document.getElementById('filter-res');
+      if (el) el.value = 'all';
+      filterState.resolution = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.codec !== 'all') {
+    createBadge(container, `Codec: ${filterState.codec}`, () => {
+      const el = document.getElementById('filter-codec');
+      if (el) el.value = 'all';
+      filterState.codec = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.quality !== 'all') {
+    createBadge(container, `Quality: ${filterState.quality}`, () => {
+      const el = document.getElementById('filter-quality');
+      if (el) el.value = 'all';
+      filterState.quality = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.releaseGroup) {
+    createBadge(container, `Group: ${filterState.releaseGroup}`, () => {
+      filterState.releaseGroup = '';
       performSearch();
     });
   }
@@ -585,6 +683,10 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
       q: filterState.query,
       category: filterState.category !== 'all' ? filterState.category : '',
       source: filterState.source !== 'all' ? filterState.source : '',
+      resolution: filterState.resolution !== 'all' ? filterState.resolution : '',
+      codec: filterState.codec !== 'all' ? filterState.codec : '',
+      quality: filterState.quality !== 'all' ? filterState.quality : '',
+      release_group: filterState.releaseGroup || '',
       sort: filterState.sort,
       min_size: filterState.minSize > 0 ? filterState.minSize.toString() : '',
       max_size: filterState.maxSize > 0 ? filterState.maxSize.toString() : '',
@@ -755,11 +857,35 @@ function renderTable(items) {
       catBg = 'rgba(16, 185, 129, 0.15)';
       catBorder = 'rgba(16, 185, 129, 0.3)';
     }
-    const catBadge = `<span class="badge" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" onclick="event.stopPropagation(); setCategoryFilter('${escapeHtml(cat)}')" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
+    let tagsHtml = '';
+    const tagBadges = [];
+    if (item.resolution) {
+      const cls = `tag-res-${item.resolution.toLowerCase()}`;
+      tagBadges.push(`<span class="tag-badge ${cls}" onclick="event.stopPropagation(); filterByTag('resolution', '${escapeHtml(item.resolution)}')">${escapeHtml(item.resolution)}</span>`);
+    }
+    if (item.codec) {
+      tagBadges.push(`<span class="tag-badge tag-codec" onclick="event.stopPropagation(); filterByTag('codec', '${escapeHtml(item.codec)}')">${escapeHtml(item.codec)}</span>`);
+    }
+    if (item.quality) {
+      tagBadges.push(`<span class="tag-badge tag-quality" onclick="event.stopPropagation(); filterByTag('quality', '${escapeHtml(item.quality)}')">${escapeHtml(item.quality)}</span>`);
+    }
+    if (item.hdr) {
+      tagBadges.push(`<span class="tag-badge tag-hdr">${escapeHtml(item.hdr)}</span>`);
+    }
+    if (item.audio) {
+      tagBadges.push(`<span class="tag-badge tag-audio">${escapeHtml(item.audio)}</span>`);
+    }
+    if (item.release_group) {
+      tagBadges.push(`<span class="tag-badge tag-group" onclick="event.stopPropagation(); filterByTag('releaseGroup', '${escapeHtml(item.release_group)}')">${escapeHtml(item.release_group)}</span>`);
+    }
+    if (tagBadges.length > 0) {
+      tagsHtml = `<div class="tags-row">${tagBadges.join('')}</div>`;
+    }
 
     tr.innerHTML = `
       <td class="torrent-title-cell">
         <a href="javascript:void(0)" class="torrent-title" onclick="showDetails(${index})">${escapeHtml(item.name)}</a>
+        ${tagsHtml}
         <div class="torrent-hash">${item.info_hash}</div>
       </td>
       <td>${catBadge}</td>
@@ -833,6 +959,21 @@ async function openTorrentDetails(item) {
 
   const dateEl = document.getElementById('detail-meta-date');
   if (dateEl) dateEl.textContent = `🕒 ${formatDate(item.created_time)}`;
+
+  // Populate detail tags
+  const tagsRow = document.getElementById('detail-tags-row');
+  if (tagsRow) {
+    tagsRow.innerHTML = '';
+    const badges = [];
+    if (item.resolution) badges.push(`<span class="tag-badge tag-res-${item.resolution.toLowerCase()}">📺 ${escapeHtml(item.resolution)}</span>`);
+    if (item.codec) badges.push(`<span class="tag-badge tag-codec">🎞️ ${escapeHtml(item.codec)}</span>`);
+    if (item.quality) badges.push(`<span class="tag-badge tag-quality">✨ ${escapeHtml(item.quality)}</span>`);
+    if (item.hdr) badges.push(`<span class="tag-badge tag-hdr">🌈 ${escapeHtml(item.hdr)}</span>`);
+    if (item.audio) badges.push(`<span class="tag-badge tag-audio">🔊 ${escapeHtml(item.audio)}</span>`);
+    if (item.release_group) badges.push(`<span class="tag-badge tag-group">👥 ${escapeHtml(item.release_group)}</span>`);
+    tagsRow.innerHTML = badges.join('');
+    tagsRow.style.display = badges.length > 0 ? 'flex' : 'none';
+  }
   
   const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
   document.getElementById('detail-magnet').textContent = magnet;

@@ -2,27 +2,36 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"local-indexer/internal/metadata"
 )
 
 type TorrentRecord struct {
-	InfoHash    string    `json:"info_hash"`
-	Name        string    `json:"name"`
-	Size        int64     `json:"size"`
-	FileCount   int       `json:"file_count"`
-	FilesJSON   string    `json:"files_json,omitempty"`
-	PieceLength int64     `json:"piece_length"`
-	CreatedTime time.Time `json:"created_time"`
-	Source      string    `json:"source"` // "dht" or "prowlarr"
-	Seeders     int       `json:"seeders"`
-	Leechers    int       `json:"leechers"`
-	Category    string    `json:"category"`
-	MagnetURI   string    `json:"magnet_uri"`
+	InfoHash     string    `json:"info_hash"`
+	Name         string    `json:"name"`
+	Size         int64     `json:"size"`
+	FileCount    int       `json:"file_count"`
+	FilesJSON    string    `json:"files_json,omitempty"`
+	PieceLength  int64     `json:"piece_length"`
+	CreatedTime  time.Time `json:"created_time"`
+	Source       string    `json:"source"` // "dht" or "prowlarr"
+	Seeders      int       `json:"seeders"`
+	Leechers     int       `json:"leechers"`
+	Category     string    `json:"category"`
+	MagnetURI    string    `json:"magnet_uri"`
+	Resolution   string    `json:"resolution,omitempty"`
+	Codec        string    `json:"codec,omitempty"`
+	Quality      string    `json:"quality,omitempty"`
+	Audio        string    `json:"audio,omitempty"`
+	HDR          string    `json:"hdr,omitempty"`
+	ReleaseGroup string    `json:"release_group,omitempty"`
 }
 
 type Stats struct {
@@ -34,14 +43,18 @@ type Stats struct {
 }
 
 type SearchFilter struct {
-	Query    string `json:"query"`
-	Category string `json:"category"`
-	Source   string `json:"source"`
-	MinSize  int64  `json:"min_size"`
-	MaxSize  int64  `json:"max_size"`
-	SortBy   string `json:"sort_by"`
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
+	Query        string `json:"query"`
+	Category     string `json:"category"`
+	Source       string `json:"source"`
+	Resolution   string `json:"resolution"`
+	Codec        string `json:"codec"`
+	Quality      string `json:"quality"`
+	ReleaseGroup string `json:"release_group"`
+	MinSize      int64  `json:"min_size"`
+	MaxSize      int64  `json:"max_size"`
+	SortBy       string `json:"sort_by"`
+	Limit        int    `json:"limit"`
+	Offset       int    `json:"offset"`
 }
 
 type Store struct {
@@ -87,7 +100,13 @@ func (s *Store) initSchema() error {
 		seeders INTEGER DEFAULT 0,
 		leechers INTEGER DEFAULT 0,
 		category TEXT DEFAULT 'Other',
-		magnet_uri TEXT
+		magnet_uri TEXT,
+		resolution TEXT DEFAULT '',
+		codec TEXT DEFAULT '',
+		quality TEXT DEFAULT '',
+		audio TEXT DEFAULT '',
+		hdr TEXT DEFAULT '',
+		release_group TEXT DEFAULT ''
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_torrents_created ON torrents(created_time DESC);
@@ -122,9 +141,83 @@ func (s *Store) initSchema() error {
 	if err != nil {
 		return err
 	}
+
+	// Schema migrations for existing databases
+	columns := []string{
+		"ALTER TABLE torrents ADD COLUMN resolution TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN codec TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN quality TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN audio TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN hdr TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN release_group TEXT DEFAULT ''",
+	}
+	for _, colSQL := range columns {
+		_, _ = s.db.Exec(colSQL)
+	}
+
+	// Create indices for new columns after ensuring columns exist
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_res ON torrents(resolution)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_codec ON torrents(codec)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_qual ON torrents(quality)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_grp ON torrents(release_group)")
+
 	// Ensure DHT records have at least 1 seeder since an announcer reached our node
 	_, _ = s.db.Exec("UPDATE torrents SET seeders = 1 WHERE source = 'dht' AND seeders <= 0")
+
+	// Asynchronously backfill tags for existing records
+	go s.backfillMetadataTags()
+
 	return nil
+}
+
+func (s *Store) backfillMetadataTags() {
+	rows, err := s.db.Query(`
+		SELECT info_hash, name, COALESCE(files_json, '')
+		FROM torrents
+		WHERE resolution = '' AND codec = '' AND quality = ''
+		LIMIT 2000
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		hash      string
+		name      string
+		filesJSON string
+	}
+	var batch []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.hash, &it.name, &it.filesJSON); err == nil {
+			batch = append(batch, it)
+		}
+	}
+	_ = rows.Close()
+
+	if len(batch) == 0 {
+		return
+	}
+
+	stmt, err := s.db.Prepare(`
+		UPDATE torrents
+		SET resolution = ?, codec = ?, quality = ?, audio = ?, hdr = ?, release_group = ?
+		WHERE info_hash = ?
+	`)
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	for _, it := range batch {
+		var files []string
+		if it.filesJSON != "" {
+			_ = json.Unmarshal([]byte(it.filesJSON), &files)
+		}
+		tags := metadata.ExtractTags(it.name, files)
+		_, _ = stmt.Exec(tags.Resolution, tags.Codec, tags.Quality, tags.Audio, tags.HDR, tags.ReleaseGroup, it.hash)
+	}
 }
 
 func (s *Store) UpsertTorrent(t *TorrentRecord) error {
@@ -138,8 +231,9 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 
 	query := `
 	INSERT INTO torrents (
-		info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri,
+		resolution, codec, quality, audio, hdr, release_group
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(info_hash) DO UPDATE SET
 		name = CASE WHEN excluded.name != '' THEN excluded.name ELSE torrents.name END,
 		size = CASE WHEN excluded.size > 0 THEN excluded.size ELSE torrents.size END,
@@ -148,7 +242,13 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 		seeders = CASE WHEN excluded.seeders > 0 THEN excluded.seeders ELSE torrents.seeders END,
 		leechers = CASE WHEN excluded.leechers > 0 THEN excluded.leechers ELSE torrents.leechers END,
 		category = CASE WHEN excluded.category != '' THEN excluded.category ELSE torrents.category END,
-		magnet_uri = CASE WHEN excluded.magnet_uri != '' THEN excluded.magnet_uri ELSE torrents.magnet_uri END;
+		magnet_uri = CASE WHEN excluded.magnet_uri != '' THEN excluded.magnet_uri ELSE torrents.magnet_uri END,
+		resolution = CASE WHEN excluded.resolution != '' THEN excluded.resolution ELSE torrents.resolution END,
+		codec = CASE WHEN excluded.codec != '' THEN excluded.codec ELSE torrents.codec END,
+		quality = CASE WHEN excluded.quality != '' THEN excluded.quality ELSE torrents.quality END,
+		audio = CASE WHEN excluded.audio != '' THEN excluded.audio ELSE torrents.audio END,
+		hdr = CASE WHEN excluded.hdr != '' THEN excluded.hdr ELSE torrents.hdr END,
+		release_group = CASE WHEN excluded.release_group != '' THEN excluded.release_group ELSE torrents.release_group END;
 	`
 	_, err := s.db.Exec(query,
 		t.InfoHash,
@@ -163,6 +263,12 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 		t.Leechers,
 		t.Category,
 		t.MagnetURI,
+		t.Resolution,
+		t.Codec,
+		t.Quality,
+		t.Audio,
+		t.HDR,
+		t.ReleaseGroup,
 	)
 	return err
 }
@@ -255,6 +361,22 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		whereClauses = append(whereClauses, "source = ?")
 		args = append(args, strings.ToLower(filter.Source))
 	}
+	if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
+		whereClauses = append(whereClauses, "resolution = ?")
+		args = append(args, filter.Resolution)
+	}
+	if filter.Codec != "" && !strings.EqualFold(filter.Codec, "all") {
+		whereClauses = append(whereClauses, "codec = ?")
+		args = append(args, filter.Codec)
+	}
+	if filter.Quality != "" && !strings.EqualFold(filter.Quality, "all") {
+		whereClauses = append(whereClauses, "quality = ?")
+		args = append(args, filter.Quality)
+	}
+	if filter.ReleaseGroup != "" && !strings.EqualFold(filter.ReleaseGroup, "all") {
+		whereClauses = append(whereClauses, "release_group = ?")
+		args = append(args, filter.ReleaseGroup)
+	}
 	if filter.MinSize > 0 {
 		whereClauses = append(whereClauses, "size >= ?")
 		args = append(args, filter.MinSize)
@@ -263,6 +385,9 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		whereClauses = append(whereClauses, "size <= ?")
 		args = append(args, filter.MaxSize)
 	}
+
+	selectCols := "info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, ''), resolution, codec, quality, audio, hdr, release_group"
+	selectColsT := "t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri, COALESCE(t.files_json, ''), t.resolution, t.codec, t.quality, t.audio, t.hdr, t.release_group"
 
 	if trimmed == "" {
 		whereSQL := ""
@@ -278,12 +403,12 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 		orderBy := buildOrderBy(filter.SortBy, false)
 		querySQL := fmt.Sprintf(`
-			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
+			SELECT %s
 			FROM torrents
 			%s
 			ORDER BY %s
 			LIMIT ? OFFSET ?
-		`, whereSQL, orderBy)
+		`, selectCols, whereSQL, orderBy)
 
 		queryArgs := append(args, filter.Limit, filter.Offset)
 		rows, err := s.db.Query(querySQL, queryArgs...)
@@ -295,7 +420,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup); err != nil {
 				return nil, 0, err
 			}
 			r.CreatedTime = parseDBTime(createdStr)
@@ -334,6 +459,22 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		ftsWhereClauses = append(ftsWhereClauses, "t.source = ?")
 		ftsArgs = append(ftsArgs, strings.ToLower(filter.Source))
 	}
+	if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.resolution = ?")
+		ftsArgs = append(ftsArgs, filter.Resolution)
+	}
+	if filter.Codec != "" && !strings.EqualFold(filter.Codec, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.codec = ?")
+		ftsArgs = append(ftsArgs, filter.Codec)
+	}
+	if filter.Quality != "" && !strings.EqualFold(filter.Quality, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.quality = ?")
+		ftsArgs = append(ftsArgs, filter.Quality)
+	}
+	if filter.ReleaseGroup != "" && !strings.EqualFold(filter.ReleaseGroup, "all") {
+		ftsWhereClauses = append(ftsWhereClauses, "t.release_group = ?")
+		ftsArgs = append(ftsArgs, filter.ReleaseGroup)
+	}
 	if filter.MinSize > 0 {
 		ftsWhereClauses = append(ftsWhereClauses, "t.size >= ?")
 		ftsArgs = append(ftsArgs, filter.MinSize)
@@ -365,6 +506,22 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 			fallbackWhere = append(fallbackWhere, "source = ?")
 			fallbackArgs = append(fallbackArgs, strings.ToLower(filter.Source))
 		}
+		if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
+			fallbackWhere = append(fallbackWhere, "resolution = ?")
+			fallbackArgs = append(fallbackArgs, filter.Resolution)
+		}
+		if filter.Codec != "" && !strings.EqualFold(filter.Codec, "all") {
+			fallbackWhere = append(fallbackWhere, "codec = ?")
+			fallbackArgs = append(fallbackArgs, filter.Codec)
+		}
+		if filter.Quality != "" && !strings.EqualFold(filter.Quality, "all") {
+			fallbackWhere = append(fallbackWhere, "quality = ?")
+			fallbackArgs = append(fallbackArgs, filter.Quality)
+		}
+		if filter.ReleaseGroup != "" && !strings.EqualFold(filter.ReleaseGroup, "all") {
+			fallbackWhere = append(fallbackWhere, "release_group = ?")
+			fallbackArgs = append(fallbackArgs, filter.ReleaseGroup)
+		}
 		if filter.MinSize > 0 {
 			fallbackWhere = append(fallbackWhere, "size >= ?")
 			fallbackArgs = append(fallbackArgs, filter.MinSize)
@@ -379,12 +536,12 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 		orderBy := buildOrderBy(filter.SortBy, false)
 		querySQL := fmt.Sprintf(`
-			SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
+			SELECT %s
 			FROM torrents
 			%s
 			ORDER BY %s
 			LIMIT ? OFFSET ?
-		`, fbWhereSQL, orderBy)
+		`, selectCols, fbWhereSQL, orderBy)
 
 		fbArgs := append(fallbackArgs, filter.Limit, filter.Offset)
 		rows, err2 := s.db.Query(querySQL, fbArgs...)
@@ -396,7 +553,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup); err != nil {
 				return nil, 0, err
 			}
 			r.CreatedTime = parseDBTime(createdStr)
@@ -407,13 +564,13 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 
 	orderBy := buildOrderBy(filter.SortBy, true)
 	searchQuery := fmt.Sprintf(`
-		SELECT t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri, COALESCE(t.files_json, '')
+		SELECT %s
 		FROM torrents_fts f
 		JOIN torrents t ON t.rowid = f.rowid
 		%s
 		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, ftsWhereSQL, orderBy)
+	`, selectColsT, ftsWhereSQL, orderBy)
 
 	finalArgs := append(ftsArgs, filter.Limit, filter.Offset)
 	rows, err := s.db.Query(searchQuery, finalArgs...)
@@ -425,7 +582,7 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 	for rows.Next() {
 		var r TorrentRecord
 		var createdStr string
-		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON); err != nil {
+		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup); err != nil {
 			return nil, 0, err
 		}
 		r.CreatedTime = parseDBTime(createdStr)
@@ -489,7 +646,8 @@ func (s *Store) GetCategories() ([]string, error) {
 func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 	cleanHash := strings.ToLower(strings.TrimSpace(hash))
 	row := s.db.QueryRow(`
-		SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, '')
+		SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, ''),
+		       resolution, codec, quality, audio, hdr, release_group
 		FROM torrents
 		WHERE LOWER(info_hash) = ?
 		LIMIT 1
@@ -497,7 +655,8 @@ func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 
 	var r TorrentRecord
 	var createdStr string
-	err := row.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON)
+	err := row.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON,
+		&r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -509,12 +668,14 @@ func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	var r TorrentRecord
 	var createdStr string
 	err := s.db.QueryRow(`
-		SELECT info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri
+		SELECT info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri,
+		       resolution, codec, quality, audio, hdr, release_group
 		FROM torrents
 		WHERE info_hash = ?
 	`, strings.ToLower(infoHash)).Scan(
 		&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.FilesJSON, &r.PieceLength,
 		&createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI,
+		&r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup,
 	)
 	if err != nil {
 		return nil, err

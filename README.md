@@ -31,6 +31,10 @@
    - File tree inspector and one-click Magnet link launcher.
    - Built-in settings modal to configure API keys, Prowlarr URL, and worker threads.
 
+6. **Content Quality & Metadata Tagging Engine**
+   - Heuristic extraction of resolution (4K, 1080p, 720p, 480p), video codec (x265, x264, AV1, XviD), source quality (BluRay, REMUX, WEB-DL, WEBRip, HDTV, CAM), audio formats (Atmos, DTS-HD, TrueHD, 5.1/AC3, FLAC, AAC), HDR (Dolby Vision, HDR10+, HDR), and release groups.
+   - Interactive badge filters in UI with dedicated SQL indices and auto-backfill for existing databases on startup.
+
 ---
 
 ## 🚀 Getting Started

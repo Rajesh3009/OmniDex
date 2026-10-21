@@ -156,6 +156,47 @@
             </select>
           </div>
 
+          <!-- Resolution Selector -->
+          <div class="control-box">
+            <span class="control-icon">📺</span>
+            <label for="filter-res" class="control-label">Res:</label>
+            <select id="filter-res" class="custom-select">
+              <option value="all">All Res</option>
+              <option value="4K">4K UHD (2160p)</option>
+              <option value="1080p">1080p FHD</option>
+              <option value="720p">720p HD</option>
+              <option value="480p">480p SD</option>
+            </select>
+          </div>
+
+          <!-- Codec Selector -->
+          <div class="control-box">
+            <span class="control-icon">🎞️</span>
+            <label for="filter-codec" class="control-label">Codec:</label>
+            <select id="filter-codec" class="custom-select">
+              <option value="all">All Codecs</option>
+              <option value="x265">x265 / HEVC</option>
+              <option value="x264">x264 / AVC</option>
+              <option value="AV1">AV1</option>
+              <option value="XviD">XviD</option>
+            </select>
+          </div>
+
+          <!-- Quality / Source Selector -->
+          <div class="control-box">
+            <span class="control-icon">✨</span>
+            <label for="filter-quality" class="control-label">Source:</label>
+            <select id="filter-quality" class="custom-select">
+              <option value="all">All Quality</option>
+              <option value="BluRay">BluRay</option>
+              <option value="REMUX">REMUX</option>
+              <option value="WEB-DL">WEB-DL</option>
+              <option value="WEBRip">WEBRip</option>
+              <option value="HDTV">HDTV</option>
+              <option value="CAM">CAM / TS</option>
+            </select>
+          </div>
+
           <!-- Sort Selector -->
           <div class="control-box">
             <span class="control-icon">↕️</span>
@@ -396,6 +437,7 @@
         <span class="meta-pill" id="detail-meta-source">Source</span>
         <span class="meta-pill" id="detail-meta-date">Date</span>
       </div>
+      <div id="detail-tags-row" class="tags-row" style="margin-bottom: 14px; margin-top: -6px;"></div>
 
       <div class="form-group" style="margin-top: 14px;">
         <label>InfoHash</label>
