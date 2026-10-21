@@ -14,7 +14,7 @@ LDFLAGS="-s -w"
 export CGO_ENABLED=0
 export GO111MODULE=on
 
-TARGET="${1:-all}"
+TARGET="${1:-current}"
 
 # Ensure repository essentials exist
 if [ ! -f "go.mod" ]; then
@@ -91,7 +91,7 @@ case "$TARGET" in
         ;;
     *)
         echo "Unknown target: $TARGET"
-        echo "Usage: ./build.sh [all|windows|linux|mac|current]"
+        echo "Usage: ./build.sh [current|windows|linux|mac|all]"
         exit 1
         ;;
 esac

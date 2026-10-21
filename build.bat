@@ -8,7 +8,7 @@ set CGO_ENABLED=0
 set GO111MODULE=on
 
 set TARGET=%1
-if "%TARGET%"=="" set TARGET=all
+if "%TARGET%"=="" set TARGET=current
 
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
@@ -19,15 +19,15 @@ echo Output Directory : %OUTPUT_DIR%
 echo Target Platform  : %TARGET%
 echo.
 
+if /I "%TARGET%"=="current" goto build_current
 if /I "%TARGET%"=="windows" goto build_windows
 if /I "%TARGET%"=="linux" goto build_linux
 if /I "%TARGET%"=="mac" goto build_mac
 if /I "%TARGET%"=="darwin" goto build_mac
 if /I "%TARGET%"=="all" goto build_all
-if /I "%TARGET%"=="current" goto build_current
 
 echo Unknown target: %TARGET%
-echo Usage: build.bat [all^|windows^|linux^|mac^|current]
+echo Usage: build.bat [current^|windows^|linux^|mac^|all]
 exit /b 1
 
 :build_all
@@ -57,6 +57,7 @@ goto finish
 :build_current
 set GOOS=windows
 set GOARCH=amd64
+if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" set GOARCH=arm64
 call :compile %GOOS% %GOARCH% .exe
 goto finish
 

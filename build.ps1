@@ -7,17 +7,17 @@
     Outputs binaries to the 'dist' folder.
 
 .PARAMETER Target
-    Target platform: 'all', 'windows', 'linux', 'mac', 'current'. Default is 'all'.
+    Target platform: 'current', 'windows', 'linux', 'mac', 'all'. Default is 'current'.
 
 .EXAMPLE
     .\build.ps1
+    .\build.ps1 -Target all
     .\build.ps1 -Target linux
-    .\build.ps1 -Target current
 #>
 
 param(
-    [ValidateSet("all", "windows", "linux", "mac", "current")]
-    [string]$Target = "all",
+    [ValidateSet("current", "windows", "linux", "mac", "all")]
+    [string]$Target = "current",
 
     [string]$OutputDir = "dist"
 )
@@ -47,9 +47,16 @@ $targets = @(
 
 # Filter targets based on parameter
 if ($Target -eq "current") {
-    $currentOS = if ($IsWindows -or ($env:OS -like "*Windows*")) { "windows" } elseif ($IsLinux) { "linux" } elseif ($IsMacOS) { "darwin" } else { "windows" }
-    $currentArch = if ([System.Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
-    $selectedTargets = @(@{ OS = $currentOS; Arch = $currentArch; Ext = $(if ($currentOS -eq "windows") { ".exe" } else { "" }); Platform = "current" })
+    $currentOS = (go env GOOS).Trim()
+    $currentArch = (go env GOARCH).Trim()
+    if (-not $currentOS) {
+        $currentOS = if ($IsWindows -or ($env:OS -like "*Windows*")) { "windows" } elseif ($IsLinux) { "linux" } elseif ($IsMacOS) { "darwin" } else { "windows" }
+    }
+    if (-not $currentArch) {
+        $currentArch = if ([System.Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
+    }
+    $ext = if ($currentOS -eq "windows") { ".exe" } else { "" }
+    $selectedTargets = @(@{ OS = $currentOS; Arch = $currentArch; Ext = $ext; Platform = "current" })
 } elseif ($Target -ne "all") {
     $selectedTargets = $targets | Where-Object { $_.Platform -eq $Target }
 } else {
