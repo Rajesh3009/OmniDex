@@ -11,6 +11,7 @@ const filterState = {
   quality: 'all',
   releaseGroup: '',
   includeSuspicious: false,
+  groupByTitle: true,
   sizePreset: 'all',
   minSize: 0,
   maxSize: 0,
@@ -135,6 +136,15 @@ function initEventListeners() {
       filterState.includeSuspicious = checkSuspicious.checked;
       filterState.page = 1;
       performSearch();
+    });
+  }
+
+  // Smart Grouping checkbox
+  const checkGrouping = document.getElementById('check-group-releases');
+  if (checkGrouping) {
+    checkGrouping.addEventListener('change', () => {
+      filterState.groupByTitle = checkGrouping.checked;
+      renderTable(currentTorrents);
     });
   }
 
@@ -855,96 +865,203 @@ function addEllipsis(container) {
   container.appendChild(span);
 }
 
+function cleanTitleKey(name) {
+  if (!name) return '';
+  let s = name.toLowerCase();
+  // Remove file extensions
+  s = s.replace(/\.(mkv|mp4|avi|iso|zip|rar|7z|tar|gz|exe|epub|pdf)$/i, '');
+  // Remove bracketed info [xxx] or (xxx)
+  s = s.replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ');
+  // Remove resolution, quality, codec, release info
+  const removeTerms = [
+    '2160p', '4k', 'uhd', '1080p', '1080i', '720p', '480p', '576p',
+    'bluray', 'bdrip', 'brrip', 'remux', 'web-dl', 'webdl', 'webrip', 'web', 'hdtv', 'pdtv', 'cam', 'ts',
+    'x265', 'h265', 'hevc', 'x264', 'h264', 'avc', 'av1', 'xvid', 'divx',
+    '10bit', '8bit', 'hdr10+', 'hdr10', 'hdr', 'dovi', 'dv',
+    'dts-hd', 'truehd', 'atmos', 'dts', 'dd5.1', 'ac3', 'eac3', 'aac', 'flac', 'mp3',
+    'yts', 'yify', 'rarbg', 'tgx', 'psa', 'flux', 'ntb', 'galaxyrg'
+  ];
+  for (const t of removeTerms) {
+    const reg = new RegExp(`\\b${t}\\b`, 'gi');
+    s = s.replace(reg, ' ');
+  }
+  // Replace dots, underscores, dashes with spaces
+  s = s.replace(/[-_.]+/g, ' ');
+  return s.trim().replace(/\s+/g, ' ');
+}
+
 function renderTable(items) {
   const tbody = document.getElementById('torrents-tbody');
   tbody.innerHTML = '';
 
+  if (!filterState.groupByTitle || items.length === 0) {
+    items.forEach((item, index) => {
+      renderTorrentRow(tbody, item, index, null);
+    });
+    return;
+  }
+
+  // Group items by cleaned title key
+  const groups = new Map();
   items.forEach((item, index) => {
-    const tr = document.createElement('tr');
-    tr.className = 'torrent-row';
+    const key = cleanTitleKey(item.name);
+    if (!key || key.length < 3) {
+      // If title cannot be meaningfully normalized, treat as individual group
+      groups.set(item.info_hash, [{ item, index }]);
+    } else {
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push({ item, index });
+    }
+  });
 
-    const sourceBadge = item.source === 'prowlarr' 
-      ? '<span class="badge badge-prowlarr">Prowlarr</span>'
-      : '<span class="badge badge-dht">DHT Wire</span>';
+  let groupCounter = 0;
+  groups.forEach((groupItems) => {
+    groupCounter++;
+    const primary = groupItems[0];
+    const subItems = groupItems.slice(1);
+    const groupId = `grp-${groupCounter}`;
 
-    const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
+    renderTorrentRow(tbody, primary.item, primary.index, {
+      groupId: groupId,
+      totalReleases: groupItems.length,
+      hasChildren: subItems.length > 0
+    });
 
-    const cat = item.category || 'Other';
-    let catColor = '#94a3b8';
-    let catBg = 'rgba(148, 163, 184, 0.15)';
-    let catBorder = 'rgba(148, 163, 184, 0.3)';
-    if (cat === 'Video') {
-      catColor = '#c084fc';
-      catBg = 'rgba(168, 85, 247, 0.15)';
-      catBorder = 'rgba(168, 85, 247, 0.3)';
-    } else if (cat === 'Audio') {
-      catColor = '#f472b6';
-      catBg = 'rgba(236, 72, 153, 0.15)';
-      catBorder = 'rgba(236, 72, 153, 0.3)';
-    } else if (cat === 'Software') {
-      catColor = '#facc15';
-      catBg = 'rgba(234, 179, 8, 0.15)';
-      catBorder = 'rgba(234, 179, 8, 0.3)';
-    } else if (cat === 'Books') {
-      catColor = '#34d399';
-      catBg = 'rgba(16, 185, 129, 0.15)';
-      catBorder = 'rgba(16, 185, 129, 0.3)';
+    if (subItems.length > 0) {
+      subItems.forEach(sub => {
+        renderTorrentRow(tbody, sub.item, sub.index, {
+          groupId: groupId,
+          isChild: true
+        });
+      });
     }
-    let tagsHtml = '';
-    const tagBadges = [];
-    if (item.resolution) {
-      const cls = `tag-res-${item.resolution.toLowerCase()}`;
-      tagBadges.push(`<span class="tag-badge ${cls}" onclick="event.stopPropagation(); filterByTag('resolution', '${escapeHtml(item.resolution)}')">${escapeHtml(item.resolution)}</span>`);
-    }
-    if (item.codec) {
-      tagBadges.push(`<span class="tag-badge tag-codec" onclick="event.stopPropagation(); filterByTag('codec', '${escapeHtml(item.codec)}')">${escapeHtml(item.codec)}</span>`);
-    }
-    if (item.quality) {
-      tagBadges.push(`<span class="tag-badge tag-quality" onclick="event.stopPropagation(); filterByTag('quality', '${escapeHtml(item.quality)}')">${escapeHtml(item.quality)}</span>`);
-    }
-    if (item.hdr) {
-      tagBadges.push(`<span class="tag-badge tag-hdr">${escapeHtml(item.hdr)}</span>`);
-    }
-    if (item.audio) {
-      tagBadges.push(`<span class="tag-badge tag-audio">${escapeHtml(item.audio)}</span>`);
-    }
-    if (item.release_group) {
-      tagBadges.push(`<span class="tag-badge tag-group" onclick="event.stopPropagation(); filterByTag('releaseGroup', '${escapeHtml(item.release_group)}')">${escapeHtml(item.release_group)}</span>`);
-    }
-    if (item.is_suspicious) {
-      tagBadges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious (${item.spam_score}%)</span>`);
-    }
-    if (tagBadges.length > 0) {
-      tagsHtml = `<div class="tags-row">${tagBadges.join('')}</div>`;
-    }
+  });
+}
 
-    tr.innerHTML = `
-      <td class="torrent-title-cell">
-        <a href="javascript:void(0)" class="torrent-title" onclick="showDetails(${index})">${escapeHtml(item.name)}</a>
-        ${tagsHtml}
-        <div class="torrent-hash">${item.info_hash}</div>
-      </td>
-      <td>${catBadge}</td>
-      <td>${formatBytes(item.size)}</td>
-      <td>
-        <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
-          📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
-        </button>
-      </td>
-      <td class="peers-cell">
-        <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
-        <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
-      </td>
-      <td>${sourceBadge}</td>
-      <td style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
-      <td style="text-align: right;">
-        <div class="action-btns" style="justify-content: flex-end;">
-          <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
-          <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
-        </div>
-      </td>
+function renderTorrentRow(tbody, item, index, groupMeta) {
+  const tr = document.createElement('tr');
+  tr.className = 'torrent-row';
+
+  if (groupMeta && groupMeta.isChild) {
+    tr.className += ` child-release-row child-of-${groupMeta.groupId}`;
+    tr.style.display = 'none'; // Initially collapsed
+  }
+
+  const sourceBadge = item.source === 'prowlarr' 
+    ? '<span class="badge badge-prowlarr">Prowlarr</span>'
+    : '<span class="badge badge-dht">DHT Wire</span>';
+
+  const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
+
+  const cat = item.category || 'Other';
+  let catColor = '#94a3b8';
+  let catBg = 'rgba(148, 163, 184, 0.15)';
+  let catBorder = 'rgba(148, 163, 184, 0.3)';
+  if (cat === 'Video') {
+    catColor = '#c084fc';
+    catBg = 'rgba(168, 85, 247, 0.15)';
+    catBorder = 'rgba(168, 85, 247, 0.3)';
+  } else if (cat === 'Audio') {
+    catColor = '#f472b6';
+    catBg = 'rgba(236, 72, 153, 0.15)';
+    catBorder = 'rgba(236, 72, 153, 0.3)';
+  } else if (cat === 'Software') {
+    catColor = '#facc15';
+    catBg = 'rgba(234, 179, 8, 0.15)';
+    catBorder = 'rgba(234, 179, 8, 0.3)';
+  } else if (cat === 'Books') {
+    catColor = '#34d399';
+    catBg = 'rgba(16, 185, 129, 0.15)';
+    catBorder = 'rgba(16, 185, 129, 0.3)';
+  }
+  const catBadge = `<span class="badge" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" onclick="event.stopPropagation(); setCategoryFilter('${escapeHtml(cat)}')" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
+
+  let tagsHtml = '';
+  const tagBadges = [];
+  if (item.resolution) {
+    const cls = `tag-res-${item.resolution.toLowerCase()}`;
+    tagBadges.push(`<span class="tag-badge ${cls}" onclick="event.stopPropagation(); filterByTag('resolution', '${escapeHtml(item.resolution)}')">${escapeHtml(item.resolution)}</span>`);
+  }
+  if (item.codec) {
+    tagBadges.push(`<span class="tag-badge tag-codec" onclick="event.stopPropagation(); filterByTag('codec', '${escapeHtml(item.codec)}')">${escapeHtml(item.codec)}</span>`);
+  }
+  if (item.quality) {
+    tagBadges.push(`<span class="tag-badge tag-quality" onclick="event.stopPropagation(); filterByTag('quality', '${escapeHtml(item.quality)}')">${escapeHtml(item.quality)}</span>`);
+  }
+  if (item.hdr) {
+    tagBadges.push(`<span class="tag-badge tag-hdr">${escapeHtml(item.hdr)}</span>`);
+  }
+  if (item.audio) {
+    tagBadges.push(`<span class="tag-badge tag-audio">${escapeHtml(item.audio)}</span>`);
+  }
+  if (item.release_group) {
+    tagBadges.push(`<span class="tag-badge tag-group" onclick="event.stopPropagation(); filterByTag('releaseGroup', '${escapeHtml(item.release_group)}')">${escapeHtml(item.release_group)}</span>`);
+  }
+  if (item.is_suspicious) {
+    tagBadges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious (${item.spam_score}%)</span>`);
+  }
+  if (tagBadges.length > 0) {
+    tagsHtml = `<div class="tags-row">${tagBadges.join('')}</div>`;
+  }
+
+  // Release group badge toggle for parent row
+  let groupBadgeHtml = '';
+  if (groupMeta && groupMeta.hasChildren) {
+    groupBadgeHtml = `
+      <button class="btn-group-toggle" onclick="event.stopPropagation(); toggleReleaseGroup('${groupMeta.groupId}', this)">
+        <span class="group-toggle-arrow">▶</span>
+        <span>${groupMeta.totalReleases} releases</span>
+      </button>
     `;
-    tbody.appendChild(tr);
+  } else if (groupMeta && groupMeta.isChild) {
+    groupBadgeHtml = `<span class="child-indicator">↳</span>`;
+  }
+
+  tr.innerHTML = `
+    <td class="torrent-title-cell">
+      <div style="display: flex; align-items: flex-start; gap: 6px;">
+        ${groupBadgeHtml}
+        <div style="flex: 1; min-width: 0;">
+          <a href="javascript:void(0)" class="torrent-title" onclick="showDetails(${index})">${escapeHtml(item.name)}</a>
+          ${tagsHtml}
+          <div class="torrent-hash">${item.info_hash}</div>
+        </div>
+      </div>
+    </td>
+    <td>${catBadge}</td>
+    <td>${formatBytes(item.size)}</td>
+    <td>
+      <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
+        📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
+      </button>
+    </td>
+    <td class="peers-cell">
+      <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
+      <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
+    </td>
+    <td>${sourceBadge}</td>
+    <td style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
+    <td style="text-align: right;">
+      <div class="action-btns" style="justify-content: flex-end;">
+        <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
+        <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
+      </div>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function toggleReleaseGroup(groupId, btn) {
+  const childRows = document.querySelectorAll(`.child-of-${groupId}`);
+  const isExpanded = btn.classList.toggle('expanded');
+  const arrow = btn.querySelector('.group-toggle-arrow');
+  if (arrow) {
+    arrow.textContent = isExpanded ? '▼' : '▶';
+  }
+  childRows.forEach(row => {
+    row.style.display = isExpanded ? 'table-row' : 'none';
   });
 }
 

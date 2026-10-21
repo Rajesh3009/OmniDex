@@ -43,6 +43,10 @@
    - Exposes standard RSS 2.0 (`/api/v1/feed/rss`) and Atom 1.0 (`/api/v1/feed/atom`) endpoints with BitTorrent enclosures.
    - Supports all search query parameters, categories, resolutions, codecs, and qualities for automated syncing in qBittorrent, Deluge, Transmission, or RSS feed readers.
 
+9. **Smart Deduplication & Grouping Engine**
+   - Automatically cleans release noise (resolution, codec, release group, audio specs, file extensions) to group duplicate and alternative quality releases of the same title together.
+   - Interactive UI clustering: neatly collapses multiple releases behind a single primary row with an expandable `X releases` toggle button, keeping search results compact and readable.
+
 ---
 
 ## 🚀 Getting Started
