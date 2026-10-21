@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 	"local-indexer/internal/db"
 	"local-indexer/internal/metadata"
+	"local-indexer/internal/spamfilter"
 )
 
 type AnnounceJob struct {
@@ -442,6 +444,11 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	rec.Audio = tags.Audio
 	rec.HDR = tags.HDR
 	rec.ReleaseGroup = tags.ReleaseGroup
+
+	spamVerdict := spamfilter.Inspect(info.Name, fileList, rec.Category, rec.Size)
+	rec.IsSuspicious = spamVerdict.IsSuspicious
+	rec.SpamScore = spamVerdict.Score
+	rec.SpamReasons = strings.Join(spamVerdict.Reasons, " • ")
 
 	if rec.FileCount == 0 {
 		rec.FileCount = 1

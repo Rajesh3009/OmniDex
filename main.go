@@ -164,6 +164,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	codec := r.URL.Query().Get("codec")
 	quality := r.URL.Query().Get("quality")
 	releaseGroup := r.URL.Query().Get("release_group")
+	includeSuspicious := r.URL.Query().Get("include_suspicious") == "true" || r.URL.Query().Get("suspicious") == "true"
 	sortBy := r.URL.Query().Get("sort")
 	if sortBy == "" {
 		sortBy = r.URL.Query().Get("sort_by")
@@ -186,18 +187,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := db.SearchFilter{
-		Query:        q,
-		Category:     category,
-		Source:       source,
-		Resolution:   resolution,
-		Codec:        codec,
-		Quality:      quality,
-		ReleaseGroup: releaseGroup,
-		MinSize:      minSize,
-		MaxSize:      maxSize,
-		SortBy:       sortBy,
-		Limit:        limit,
-		Offset:       offset,
+		Query:             q,
+		Category:          category,
+		Source:            source,
+		Resolution:        resolution,
+		Codec:             codec,
+		Quality:           quality,
+		ReleaseGroup:      releaseGroup,
+		IncludeSuspicious: includeSuspicious,
+		MinSize:           minSize,
+		MaxSize:           maxSize,
+		SortBy:            sortBy,
+		Limit:             limit,
+		Offset:            offset,
 	}
 
 	results, total, err := s.store.SearchWithFilter(filter)

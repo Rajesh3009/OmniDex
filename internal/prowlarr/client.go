@@ -14,6 +14,7 @@ import (
 
 	"local-indexer/internal/db"
 	"local-indexer/internal/metadata"
+	"local-indexer/internal/spamfilter"
 )
 
 type Client struct {
@@ -143,6 +144,7 @@ func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 	}
 
 	tags := metadata.ExtractTags(item.Title, nil)
+	spamVerdict := spamfilter.Inspect(item.Title, nil, category, item.Size)
 
 	return db.TorrentRecord{
 		InfoHash:     hash,
@@ -162,5 +164,8 @@ func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 		Audio:        tags.Audio,
 		HDR:          tags.HDR,
 		ReleaseGroup: tags.ReleaseGroup,
+		IsSuspicious: spamVerdict.IsSuspicious,
+		SpamScore:    spamVerdict.Score,
+		SpamReasons:  strings.Join(spamVerdict.Reasons, " • "),
 	}
 }

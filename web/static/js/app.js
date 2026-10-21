@@ -10,6 +10,7 @@ const filterState = {
   codec: 'all',
   quality: 'all',
   releaseGroup: '',
+  includeSuspicious: false,
   sizePreset: 'all',
   minSize: 0,
   maxSize: 0,
@@ -122,6 +123,16 @@ function initEventListeners() {
   if (qualSelect) {
     qualSelect.addEventListener('change', () => {
       filterState.quality = qualSelect.value;
+      filterState.page = 1;
+      performSearch();
+    });
+  }
+
+  // Suspicious checkbox
+  const checkSuspicious = document.getElementById('check-include-suspicious');
+  if (checkSuspicious) {
+    checkSuspicious.addEventListener('change', () => {
+      filterState.includeSuspicious = checkSuspicious.checked;
       filterState.page = 1;
       performSearch();
     });
@@ -386,6 +397,7 @@ function resetFilters() {
   filterState.codec = 'all';
   filterState.quality = 'all';
   filterState.releaseGroup = '';
+  filterState.includeSuspicious = false;
   filterState.sort = 'created_desc';
   filterState.page = 1;
   filterState.limit = 20;
@@ -402,6 +414,8 @@ function resetFilters() {
   if (filterCodec) filterCodec.value = 'all';
   const filterQual = document.getElementById('filter-quality');
   if (filterQual) filterQual.value = 'all';
+  const checkSuspicious = document.getElementById('check-include-suspicious');
+  if (checkSuspicious) checkSuspicious.checked = false;
   const sortSelect = document.getElementById('sort-select');
   if (sortSelect) sortSelect.value = 'created_desc';
   const limitSelect = document.getElementById('select-page-limit');
@@ -438,6 +452,15 @@ function renderActiveFilterBadges() {
     createBadge(container, `Source: ${filterState.source === 'dht' ? 'DHT Wire' : 'Prowlarr'}`, () => {
       document.getElementById('filter-source').value = 'all';
       filterState.source = 'all';
+      performSearch();
+    });
+  }
+
+  if (filterState.includeSuspicious) {
+    createBadge(container, `⚠️ Showing Suspicious`, () => {
+      const el = document.getElementById('check-include-suspicious');
+      if (el) el.checked = false;
+      filterState.includeSuspicious = false;
       performSearch();
     });
   }
@@ -687,6 +710,7 @@ async function performSearch(overrideQuery, triggerProwlarr = true) {
       codec: filterState.codec !== 'all' ? filterState.codec : '',
       quality: filterState.quality !== 'all' ? filterState.quality : '',
       release_group: filterState.releaseGroup || '',
+      include_suspicious: filterState.includeSuspicious ? 'true' : 'false',
       sort: filterState.sort,
       min_size: filterState.minSize > 0 ? filterState.minSize.toString() : '',
       max_size: filterState.maxSize > 0 ? filterState.maxSize.toString() : '',
@@ -878,6 +902,9 @@ function renderTable(items) {
     if (item.release_group) {
       tagBadges.push(`<span class="tag-badge tag-group" onclick="event.stopPropagation(); filterByTag('releaseGroup', '${escapeHtml(item.release_group)}')">${escapeHtml(item.release_group)}</span>`);
     }
+    if (item.is_suspicious) {
+      tagBadges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious (${item.spam_score}%)</span>`);
+    }
     if (tagBadges.length > 0) {
       tagsHtml = `<div class="tags-row">${tagBadges.join('')}</div>`;
     }
@@ -971,6 +998,7 @@ async function openTorrentDetails(item) {
     if (item.hdr) badges.push(`<span class="tag-badge tag-hdr">🌈 ${escapeHtml(item.hdr)}</span>`);
     if (item.audio) badges.push(`<span class="tag-badge tag-audio">🔊 ${escapeHtml(item.audio)}</span>`);
     if (item.release_group) badges.push(`<span class="tag-badge tag-group">👥 ${escapeHtml(item.release_group)}</span>`);
+    if (item.is_suspicious) badges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious Risk (${item.spam_score}%): ${escapeHtml(item.spam_reasons || 'Unverified content')}</span>`);
     tagsRow.innerHTML = badges.join('');
     tagsRow.style.display = badges.length > 0 ? 'flex' : 'none';
   }

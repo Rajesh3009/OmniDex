@@ -35,6 +35,10 @@
    - Heuristic extraction of resolution (4K, 1080p, 720p, 480p), video codec (x265, x264, AV1, XviD), source quality (BluRay, REMUX, WEB-DL, WEBRip, HDTV, CAM), audio formats (Atmos, DTS-HD, TrueHD, 5.1/AC3, FLAC, AAC), HDR (Dolby Vision, HDR10+, HDR), and release groups.
    - Interactive badge filters in UI with dedicated SQL indices and auto-backfill for existing databases on startup.
 
+7. **Spam & Malicious Torrent Filter**
+   - Heuristic threat scoring against dangerous double extensions (e.g. `.mkv.exe`, `.mp4.scr`), executables disguised inside media/book categories, fake codec download instructions, locked password traps, and URL redirect scams.
+   - Soft filtering protection: safely flags suspicious items with pulsing warning badges and risk percentages while cleanly suppressing them by default from Torznab/Search results (with an opt-in toggle to view suspicious items).
+
 ---
 
 ## 🚀 Getting Started

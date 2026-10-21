@@ -762,6 +762,19 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
+.tag-spam {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  font-weight: 700;
+  animation: pulse-border 2s infinite ease-in-out;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(239, 68, 68, 0.5); }
+  50% { border-color: rgba(239, 68, 68, 0.9); }
+}
+
 .action-btns {
   display: flex;
   gap: 8px;
