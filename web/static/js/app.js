@@ -1117,7 +1117,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   }
 
   tr.innerHTML = `
-    <td class="torrent-title-cell">
+    <td class="torrent-title-cell" data-label="Title">
       <div style="display: flex; align-items: flex-start; gap: 6px;">
         ${groupBadgeHtml}
         <div style="flex: 1; min-width: 0;">
@@ -1127,20 +1127,20 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
         </div>
       </div>
     </td>
-    <td>${catBadge}</td>
-    <td>${formatBytes(item.size)}</td>
-    <td>
+    <td data-label="Category">${catBadge}</td>
+    <td data-label="Size">${formatBytes(item.size)}</td>
+    <td data-label="Files">
       <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
         📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
       </button>
     </td>
-    <td class="peers-cell">
+    <td class="peers-cell" data-label="Peers">
       <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
       <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
     </td>
-    <td>${sourceBadge}</td>
-    <td style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
-    <td style="text-align: right;">
+    <td data-label="Source">${sourceBadge}</td>
+    <td data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
+    <td class="torrent-actions-cell" data-label="Actions" style="text-align: right;">
       <div class="action-btns" style="justify-content: flex-end;">
         <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
         <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
