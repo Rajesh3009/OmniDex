@@ -858,6 +858,36 @@ body {
   border-color: var(--accent-blue);
 }
 
+/* Peer Badges (Seeders & Leechers) */
+.peers-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.seeders-badge, .leechers-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+
+.seeders-badge {
+  color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.leechers-badge {
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;
@@ -1395,24 +1425,24 @@ body {
     gap: 12px;
   }
 
-  .category-pills {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding-bottom: 4px;
-    gap: 6px;
+  .category-pills-wrap {
+    overflow-x: visible;
   }
 
-  .category-pills::-webkit-scrollbar {
-    display: none;
+  .category-pills {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
+    gap: 6px;
+    width: 100%;
   }
 
   .pill-btn {
-    padding: 6px 12px;
-    font-size: 0.8rem;
-    flex-shrink: 0;
+    width: 100%;
+    justify-content: center;
+    padding: 7px 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    text-align: center;
   }
 
   .controls-bar {
@@ -1507,6 +1537,17 @@ body {
     padding: 6px 0;
     border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
     font-size: 0.85rem;
+  }
+
+  .torrent-table td.peers-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .torrent-table td.peers-cell::before {
+    margin-right: auto;
   }
 
   .torrent-table td:last-child {
