@@ -75,6 +75,16 @@
         <span class="stat-value" id="stat-ram-usage">0 MB</span>
         <span class="stat-sub" id="stat-ram-sub">Min: 0 MB · Max: 0 MB</span>
       </div>
+      <div class="stat-card" style="--card-color: #3b82f6" id="stat-card-download">
+        <span class="stat-label">Bandwidth Download</span>
+        <span class="stat-value" id="stat-dl-rate">0 B/s</span>
+        <span class="stat-sub" id="stat-dl-total">Total: 0 B · Limit: None</span>
+      </div>
+      <div class="stat-card" style="--card-color: #10b981" id="stat-card-upload">
+        <span class="stat-label">Bandwidth Upload</span>
+        <span class="stat-value" id="stat-ul-rate">0 B/s</span>
+        <span class="stat-sub" id="stat-ul-total">Total: 0 B · Limit: None</span>
+      </div>
     </section>
 
     <!-- Search Section -->
@@ -428,6 +438,21 @@
         <div class="form-group">
           <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
           <input type="number" id="cfg-dht-workers" class="form-input" min="5" max="50">
+        </div>
+        <div class="form-group">
+          <label for="cfg-max-download-rate">Download Bandwidth Limit (KB/s)</label>
+          <input type="number" id="cfg-max-download-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 1024 KB/s">
+          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed. Limit applies to DHT wire swarm traffic.</small>
+        </div>
+        <div class="form-group">
+          <label for="cfg-max-upload-rate">Upload Bandwidth Limit (KB/s)</label>
+          <input type="number" id="cfg-max-upload-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 512 KB/s">
+          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed.</small>
+        </div>
+        <div class="form-group">
+          <label for="cfg-monthly-data-limit">Monthly Internet Data Limit (GB)</label>
+          <input type="number" id="cfg-monthly-data-limit" class="form-input" min="0" step="0.1" placeholder="0 (unlimited) or e.g. 50 GB">
+          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Cap monthly network usage (download + upload). When reached, crawling pauses until next calendar month or limit increase.</small>
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">

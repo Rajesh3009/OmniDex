@@ -58,6 +58,9 @@ func main() {
 		DHTListenAddr:   cfg.DHTListenAddr,
 		MaxTorrentPeers: cfg.MaxTorrentPeers,
 		Workers:         cfg.DHTWorkers,
+		MaxDownloadRate:       cfg.MaxDownloadRate,
+		MaxUploadRate:         cfg.MaxUploadRate,
+		MonthlyDataLimitBytes: cfg.MonthlyDataLimitBytes,
 	}
 	crawler, err := dhtcrawler.NewCrawler(crawlerCfg, store)
 	if err != nil {
@@ -286,10 +289,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var update struct {
-			ProwlarrURL    string `json:"prowlarr_url"`
-			ProwlarrAPIKey string `json:"prowlarr_api_key"`
-			TorznabAPIKey  string `json:"torznab_api_key"`
-			DHTWorkers     int    `json:"dht_workers"`
+			ProwlarrURL     string `json:"prowlarr_url"`
+			ProwlarrAPIKey  string `json:"prowlarr_api_key"`
+			TorznabAPIKey   string `json:"torznab_api_key"`
+			DHTWorkers      int    `json:"dht_workers"`
+			MaxDownloadRate       *int64 `json:"max_download_rate"`
+			MaxUploadRate         *int64 `json:"max_upload_rate"`
+			MonthlyDataLimitBytes *int64 `json:"monthly_data_limit_bytes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -310,6 +316,34 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.DHTWorkers > 0 {
 			s.cfg.DHTWorkers = update.DHTWorkers
+		}
+		if update.MaxDownloadRate != nil {
+			dl := *update.MaxDownloadRate
+			if dl < 0 {
+				dl = 0
+			}
+			s.cfg.MaxDownloadRate = dl
+		}
+		if update.MaxUploadRate != nil {
+			ul := *update.MaxUploadRate
+			if ul < 0 {
+				ul = 0
+			}
+			s.cfg.MaxUploadRate = ul
+		}
+		if update.MonthlyDataLimitBytes != nil {
+			ml := *update.MonthlyDataLimitBytes
+			if ml < 0 {
+				ml = 0
+			}
+			s.cfg.MonthlyDataLimitBytes = ml
+			if s.crawler != nil {
+				s.crawler.SetMonthlyLimit(ml)
+			}
+		}
+
+		if s.crawler != nil && (update.MaxDownloadRate != nil || update.MaxUploadRate != nil) {
+			s.crawler.SetRateLimits(s.cfg.MaxDownloadRate, s.cfg.MaxUploadRate)
 		}
 
 		_ = config.SaveConfig(s.cfgPath, s.cfg)

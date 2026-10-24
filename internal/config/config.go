@@ -14,18 +14,24 @@ type Config struct {
 	TorznabAPIKey   string `json:"torznab_api_key"`
 	ProwlarrURL     string `json:"prowlarr_url"`
 	ProwlarrAPIKey  string `json:"prowlarr_api_key"`
+	MaxDownloadRate       int64  `json:"max_download_rate"`        // bytes/sec (0 = unlimited)
+	MaxUploadRate         int64  `json:"max_upload_rate"`          // bytes/sec (0 = unlimited)
+	MonthlyDataLimitBytes int64  `json:"monthly_data_limit_bytes"` // bytes/month (0 = unlimited)
 }
 
 func DefaultConfig() Config {
 	return Config{
-		WebPort:         8686,
-		DHTListenAddr:   ":6881",
-		DHTWorkers:      15,
-		MaxTorrentPeers: 20,
-		DBPath:          "indexer.db",
-		TorznabAPIKey:   "local-indexer-secret-key",
-		ProwlarrURL:     "http://localhost:9696",
-		ProwlarrAPIKey:  "",
+		WebPort:               8686,
+		DHTListenAddr:         ":6881",
+		DHTWorkers:            15,
+		MaxTorrentPeers:       20,
+		DBPath:                "indexer.db",
+		TorznabAPIKey:         "local-indexer-secret-key",
+		ProwlarrURL:           "http://localhost:9696",
+		ProwlarrAPIKey:        "",
+		MaxDownloadRate:       0,
+		MaxUploadRate:         0,
+		MonthlyDataLimitBytes: 0,
 	}
 }
 

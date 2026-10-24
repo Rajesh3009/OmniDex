@@ -6,5 +6,8 @@
   "db_path": "indexer.db",
   "torznab_api_key": "local-indexer-secret-key",
   "prowlarr_url": "http://localhost:9696",
-  "prowlarr_api_key": ""
+  "prowlarr_api_key": "",
+  "max_download_rate": 0,
+  "max_upload_rate": 0,
+  "monthly_data_limit_bytes": 0
 }

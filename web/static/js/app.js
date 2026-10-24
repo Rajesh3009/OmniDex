@@ -256,11 +256,18 @@ function initEventListeners() {
   // Settings form submission
   document.getElementById('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const dlKb = parseFloat(document.getElementById('cfg-max-download-rate')?.value) || 0;
+    const ulKb = parseFloat(document.getElementById('cfg-max-upload-rate')?.value) || 0;
+    const monthlyGb = parseFloat(document.getElementById('cfg-monthly-data-limit')?.value) || 0;
+
     const payload = {
       prowlarr_url: document.getElementById('cfg-prowlarr-url').value,
       prowlarr_api_key: document.getElementById('cfg-prowlarr-key').value,
       torznab_api_key: document.getElementById('cfg-torznab-key').value,
-      dht_workers: parseInt(document.getElementById('cfg-dht-workers').value, 10) || 15
+      dht_workers: parseInt(document.getElementById('cfg-dht-workers').value, 10) || 15,
+      max_download_rate: Math.max(0, Math.round(dlKb * 1024)),
+      max_upload_rate: Math.max(0, Math.round(ulKb * 1024)),
+      monthly_data_limit_bytes: Math.max(0, Math.round(monthlyGb * 1024 * 1024 * 1024))
     };
 
     try {
@@ -272,6 +279,7 @@ function initEventListeners() {
       if (resp.ok) {
         closeModal('modal-settings');
         loadConfig();
+        loadStats();
       } else {
         alert('Failed to update config: ' + await resp.text());
       }
@@ -601,6 +609,59 @@ async function loadStats() {
       }
     }
 
+    // Bandwidth Download & Upload Stats
+    const dlRateEl = document.getElementById('stat-dl-rate');
+    const dlTotalEl = document.getElementById('stat-dl-total');
+    const ulRateEl = document.getElementById('stat-ul-rate');
+    const ulTotalEl = document.getElementById('stat-ul-total');
+
+    if (data.dht) {
+      const dhtMetrics = data.dht;
+      const monthlyLimitActive = dhtMetrics.monthly_data_limit_bytes > 0;
+      const monthlyLimitFormatted = monthlyLimitActive ? formatBytes(dhtMetrics.monthly_data_limit_bytes) : 'None';
+      const monthlyUsageFormatted = formatBytes(dhtMetrics.monthly_total_used || 0);
+
+      if (dlRateEl) {
+        if (dhtMetrics.monthly_limit_exceeded) {
+          dlRateEl.innerHTML = `<span style="color: #ef4444;" title="Monthly internet data limit reached! DHT metadata indexing paused.">PAUSED</span>`;
+        } else {
+          dlRateEl.textContent = `${formatBytes(dhtMetrics.download_bytes_rate || 0)}/s`;
+        }
+      }
+      if (dlTotalEl) {
+        const dlLimitText = dhtMetrics.max_download_rate > 0 ? `${formatBytes(dhtMetrics.max_download_rate)}/s` : 'None';
+        if (monthlyLimitActive) {
+          dlTotalEl.textContent = `Month: ${formatBytes(dhtMetrics.monthly_downloaded || 0)} / ${monthlyLimitFormatted}`;
+        } else {
+          dlTotalEl.textContent = `Total: ${formatBytes(dhtMetrics.total_downloaded || 0)} · Rate Limit: ${dlLimitText}`;
+        }
+        const dlCard = document.getElementById('stat-card-download');
+        if (dlCard) {
+          dlCard.title = `Live Download Rate: ${formatBytes(dhtMetrics.download_bytes_rate || 0)}/s\nSession Inbound: ${formatBytes(dhtMetrics.session_downloaded || 0)}\nThis Month (${dhtMetrics.current_month || 'Current'}): ${formatBytes(dhtMetrics.monthly_downloaded || 0)}\nAll-Time Persistent: ${formatBytes(dhtMetrics.total_downloaded || 0)}\nConfigured Rate Limit: ${dlLimitText}\nMonthly Cap: ${monthlyLimitFormatted} (Used: ${monthlyUsageFormatted})${dhtMetrics.monthly_limit_exceeded ? '\n⚠️ MONTHLY LIMIT REACHED - CRAWLER PAUSED' : ''}`;
+        }
+      }
+
+      if (ulRateEl) {
+        if (dhtMetrics.monthly_limit_exceeded) {
+          ulRateEl.innerHTML = `<span style="color: #ef4444;" title="Monthly internet data limit reached! DHT metadata indexing paused.">PAUSED</span>`;
+        } else {
+          ulRateEl.textContent = `${formatBytes(dhtMetrics.upload_bytes_rate || 0)}/s`;
+        }
+      }
+      if (ulTotalEl) {
+        const ulLimitText = dhtMetrics.max_upload_rate > 0 ? `${formatBytes(dhtMetrics.max_upload_rate)}/s` : 'None';
+        if (monthlyLimitActive) {
+          ulTotalEl.textContent = `Month: ${formatBytes(dhtMetrics.monthly_uploaded || 0)} / ${monthlyLimitFormatted}`;
+        } else {
+          ulTotalEl.textContent = `Total: ${formatBytes(dhtMetrics.total_uploaded || 0)} · Rate Limit: ${ulLimitText}`;
+        }
+        const ulCard = document.getElementById('stat-card-upload');
+        if (ulCard) {
+          ulCard.title = `Live Upload Rate: ${formatBytes(dhtMetrics.upload_bytes_rate || 0)}/s\nSession Outbound: ${formatBytes(dhtMetrics.session_uploaded || 0)}\nThis Month (${dhtMetrics.current_month || 'Current'}): ${formatBytes(dhtMetrics.monthly_uploaded || 0)}\nAll-Time Persistent: ${formatBytes(dhtMetrics.total_uploaded || 0)}\nConfigured Rate Limit: ${ulLimitText}\nMonthly Cap: ${monthlyLimitFormatted} (Used: ${monthlyUsageFormatted})${dhtMetrics.monthly_limit_exceeded ? '\n⚠️ MONTHLY LIMIT REACHED - CRAWLER PAUSED' : ''}`;
+        }
+      }
+    }
+
     // Dynamic list update: If new torrents have been indexed (via DHT or Prowlarr)
     // and user is viewing page 1 with no active modal or editing in progress, refresh page 1 silently!
     if (lastKnownTorrentCount !== null && totalTorrents !== lastKnownTorrentCount) {
@@ -651,6 +712,19 @@ async function loadConfig() {
     document.getElementById('cfg-prowlarr-key').value = cfg.prowlarr_api_key || '';
     document.getElementById('cfg-torznab-key').value = cfg.torznab_api_key || '';
     document.getElementById('cfg-dht-workers').value = cfg.dht_workers || 15;
+
+    const dlRateInput = document.getElementById('cfg-max-download-rate');
+    if (dlRateInput) {
+      dlRateInput.value = cfg.max_download_rate ? Math.round(cfg.max_download_rate / 1024) : 0;
+    }
+    const ulRateInput = document.getElementById('cfg-max-upload-rate');
+    if (ulRateInput) {
+      ulRateInput.value = cfg.max_upload_rate ? Math.round(cfg.max_upload_rate / 1024) : 0;
+    }
+    const monthlyLimitInput = document.getElementById('cfg-monthly-data-limit');
+    if (monthlyLimitInput) {
+      monthlyLimitInput.value = cfg.monthly_data_limit_bytes ? (cfg.monthly_data_limit_bytes / (1024 * 1024 * 1024)).toFixed(1) : 0;
+    }
 
     document.getElementById('torznab-key-display').textContent = cfg.torznab_api_key || 'N/A';
     document.getElementById('torznab-url-display').textContent = `${window.location.origin}/api/v1/torznab`;

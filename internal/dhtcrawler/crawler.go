@@ -21,6 +21,8 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage/disabled"
 
+	"golang.org/x/time/rate"
+
 	"local-indexer/internal/db"
 	"local-indexer/internal/metadata"
 	"local-indexer/internal/spamfilter"
@@ -33,19 +35,36 @@ type AnnounceJob struct {
 }
 
 type CrawlerConfig struct {
-	DHTListenAddr   string
-	MaxTorrentPeers int
-	Workers         int
+	DHTListenAddr         string
+	MaxTorrentPeers       int
+	Workers               int
+	MaxDownloadRate       int64
+	MaxUploadRate         int64
+	MonthlyDataLimitBytes int64
 }
 
 type Metrics struct {
-	AnnouncesReceived int64 `json:"announces_received"`
-	MetadataResolved  int64 `json:"metadata_resolved"`
-	MetadataFailed    int64 `json:"metadata_failed"`
-	ActiveResolving   int64 `json:"active_resolving"`
-	QueueLen          int   `json:"queue_len"`
-	GoodNodes         int   `json:"good_nodes"`
-	TotalNodes        int   `json:"total_nodes"`
+	AnnouncesReceived     int64   `json:"announces_received"`
+	MetadataResolved      int64   `json:"metadata_resolved"`
+	MetadataFailed        int64   `json:"metadata_failed"`
+	ActiveResolving       int64   `json:"active_resolving"`
+	QueueLen              int     `json:"queue_len"`
+	GoodNodes             int     `json:"good_nodes"`
+	TotalNodes            int     `json:"total_nodes"`
+	DownloadBytesRate     float64 `json:"download_bytes_rate"`     // current rate bytes/sec
+	UploadBytesRate       float64 `json:"upload_bytes_rate"`       // current rate bytes/sec
+	TotalDownloaded       int64   `json:"total_downloaded"`        // persistent total bytes
+	TotalUploaded         int64   `json:"total_uploaded"`          // persistent total bytes
+	SessionDownloaded     int64   `json:"session_downloaded"`      // current session bytes
+	SessionUploaded       int64   `json:"session_uploaded"`        // current session bytes
+	MaxDownloadRate       int64   `json:"max_download_rate"`       // configured limit
+	MaxUploadRate         int64   `json:"max_upload_rate"`         // configured limit
+	MonthlyDownloaded     int64   `json:"monthly_downloaded"`      // monthly downloaded bytes
+	MonthlyUploaded       int64   `json:"monthly_uploaded"`        // monthly uploaded bytes
+	MonthlyTotalUsed      int64   `json:"monthly_total_used"`      // monthly combined bytes
+	MonthlyDataLimitBytes int64   `json:"monthly_data_limit_bytes"` // configured monthly limit (0 = unlimited)
+	MonthlyLimitExceeded  bool    `json:"monthly_limit_exceeded"`  // true if monthly limit reached
+	CurrentMonth          string  `json:"current_month"`           // YYYY-MM
 }
 
 type GraphNode struct {
@@ -79,6 +98,80 @@ type Crawler struct {
 	metrics Metrics
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	downloadLimiter *rate.Limiter
+	uploadLimiter   *rate.Limiter
+
+	bwMu              sync.Mutex
+	lastStatsSample   time.Time
+	lastClientRead    int64
+	lastClientWritten int64
+	totalDownloaded   int64 // persistent base + session
+	totalUploaded     int64 // persistent base + session
+	lastPersistRead   int64
+	lastPersistWrite  int64
+	currentDlRate     float64
+	currentUlRate     float64
+}
+
+func makeLimiter(bytesPerSec int64) *rate.Limiter {
+	if bytesPerSec <= 0 {
+		return rate.NewLimiter(rate.Inf, 256*1024)
+	}
+	burst := int(bytesPerSec)
+	if burst < 64*1024 {
+		burst = 64 * 1024
+	}
+	return rate.NewLimiter(rate.Limit(bytesPerSec), burst)
+}
+
+func (c *Crawler) SetRateLimits(maxDownloadBytesPerSec, maxUploadBytesPerSec int64) {
+	c.bwMu.Lock()
+	defer c.bwMu.Unlock()
+
+	c.cfg.MaxDownloadRate = maxDownloadBytesPerSec
+	c.cfg.MaxUploadRate = maxUploadBytesPerSec
+
+	if maxDownloadBytesPerSec <= 0 {
+		c.downloadLimiter.SetLimit(rate.Inf)
+	} else {
+		c.downloadLimiter.SetLimit(rate.Limit(maxDownloadBytesPerSec))
+		burst := int(maxDownloadBytesPerSec)
+		if burst < 64*1024 {
+			burst = 64 * 1024
+		}
+		c.downloadLimiter.SetBurst(burst)
+	}
+
+	if maxUploadBytesPerSec <= 0 {
+		c.uploadLimiter.SetLimit(rate.Inf)
+	} else {
+		c.uploadLimiter.SetLimit(rate.Limit(maxUploadBytesPerSec))
+		burst := int(maxUploadBytesPerSec)
+		if burst < 64*1024 {
+			burst = 64 * 1024
+		}
+		c.uploadLimiter.SetBurst(burst)
+	}
+}
+
+func (c *Crawler) SetMonthlyLimit(limitBytes int64) {
+	c.bwMu.Lock()
+	defer c.bwMu.Unlock()
+	c.cfg.MonthlyDataLimitBytes = limitBytes
+}
+
+func (c *Crawler) IsMonthlyLimitExceeded() bool {
+	c.bwMu.Lock()
+	defer c.bwMu.Unlock()
+	if c.cfg.MonthlyDataLimitBytes <= 0 || c.store == nil {
+		return false
+	}
+	bs, err := c.store.GetBandwidthStats()
+	if err != nil {
+		return false
+	}
+	return (bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes) >= c.cfg.MonthlyDataLimitBytes
 }
 
 func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
@@ -94,12 +187,29 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	dlLimiter := makeLimiter(cfg.MaxDownloadRate)
+	ulLimiter := makeLimiter(cfg.MaxUploadRate)
+
+	// Load persistent bandwidth stats from store
+	var initDownloaded, initUploaded int64
+	if store != nil {
+		if bs, err := store.GetBandwidthStats(); err == nil {
+			initDownloaded = bs.TotalDownloadedBytes
+			initUploaded = bs.TotalUploadedBytes
+		}
+	}
+
 	c := &Crawler{
-		cfg:      cfg,
-		store:    store,
-		workChan: make(chan AnnounceJob, 2500),
-		ctx:      ctx,
-		cancel:   cancel,
+		cfg:             cfg,
+		store:           store,
+		workChan:        make(chan AnnounceJob, 2500),
+		ctx:             ctx,
+		cancel:          cancel,
+		downloadLimiter: dlLimiter,
+		uploadLimiter:   ulLimiter,
+		lastStatsSample: time.Now(),
+		totalDownloaded: initDownloaded,
+		totalUploaded:   initUploaded,
 	}
 
 	// Setup lightweight anacrolix torrent client for wire metadata resolution
@@ -111,6 +221,8 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 	tcfg.DisableAcceptRateLimiting = true
 	tcfg.EstablishedConnsPerTorrent = cfg.MaxTorrentPeers
 	tcfg.DefaultStorage = disabled.Client{} // Purely memory-based no-op metadata crawler; no disk writes or dummy files
+	tcfg.DownloadRateLimiter = dlLimiter
+	tcfg.UploadRateLimiter = ulLimiter
 
 	cl, err := torrent.NewClient(tcfg)
 	if err != nil {
@@ -294,6 +406,19 @@ func (c *Crawler) Start() {
 	}()
 }
 
+func (c *Crawler) flushBandwidthLocked() {
+	if c.store == nil {
+		return
+	}
+	deltaDown := c.lastClientRead - c.lastPersistRead
+	deltaUp := c.lastClientWritten - c.lastPersistWrite
+	if deltaDown > 0 || deltaUp > 0 {
+		_ = c.store.AddBandwidthStats(deltaDown, deltaUp)
+		c.lastPersistRead = c.lastClientRead
+		c.lastPersistWrite = c.lastClientWritten
+	}
+}
+
 func (c *Crawler) Stop() {
 	c.cancel()
 	if c.dhtServer != nil {
@@ -302,9 +427,16 @@ func (c *Crawler) Stop() {
 	if c.client != nil {
 		c.client.Close()
 	}
+	c.bwMu.Lock()
+	c.flushBandwidthLocked()
+	c.bwMu.Unlock()
 }
 
 func (c *Crawler) enqueue(hash metainfo.Hash, ip net.IP, port int) {
+	if c.IsMonthlyLimitExceeded() {
+		return
+	}
+
 	hashHex := hex.EncodeToString(hash[:])
 	if _, loaded := c.visited.LoadOrStore(hashHex, time.Now()); loaded {
 		return
@@ -335,6 +467,10 @@ func (c *Crawler) worker(id int) {
 }
 
 func (c *Crawler) resolveMetadata(job AnnounceJob) {
+	if c.IsMonthlyLimitExceeded() {
+		return
+	}
+
 	hashHex := hex.EncodeToString(job.Hash[:])
 	atomic.AddInt64(&c.metrics.ActiveResolving, 1)
 	defer atomic.AddInt64(&c.metrics.ActiveResolving, -1)
@@ -500,6 +636,46 @@ func contains(a, b string) bool {
 	return false
 }
 
+func (c *Crawler) sampleBandwidthLocked() {
+	now := time.Now()
+	elapsed := now.Sub(c.lastStatsSample).Seconds()
+
+	if c.client != nil {
+		cs := c.client.Stats()
+		currentRead := cs.BytesRead.Int64()
+		currentWritten := cs.BytesWritten.Int64()
+
+		deltaRead := currentRead - c.lastClientRead
+		deltaWritten := currentWritten - c.lastClientWritten
+
+		if deltaRead < 0 {
+			deltaRead = 0
+		}
+		if deltaWritten < 0 {
+			deltaWritten = 0
+		}
+
+		c.lastClientRead = currentRead
+		c.lastClientWritten = currentWritten
+
+		c.totalDownloaded += deltaRead
+		c.totalUploaded += deltaWritten
+
+		if elapsed > 0 {
+			c.currentDlRate = float64(deltaRead) / elapsed
+			c.currentUlRate = float64(deltaWritten) / elapsed
+		}
+		c.lastStatsSample = now
+
+		// Persist deltas to SQLite store if accumulated > 32KB or periodically
+		deltaPersistDown := c.lastClientRead - c.lastPersistRead
+		deltaPersistUp := c.lastClientWritten - c.lastPersistWrite
+		if deltaPersistDown >= 32*1024 || deltaPersistUp >= 32*1024 {
+			c.flushBandwidthLocked()
+		}
+	}
+}
+
 func (c *Crawler) Metrics() Metrics {
 	m := c.metrics
 	m.QueueLen = len(c.workChan)
@@ -508,6 +684,32 @@ func (c *Crawler) Metrics() Metrics {
 		m.GoodNodes = stats.GoodNodes
 		m.TotalNodes = stats.Nodes
 	}
+
+	c.bwMu.Lock()
+	c.sampleBandwidthLocked()
+	m.DownloadBytesRate = c.currentDlRate
+	m.UploadBytesRate = c.currentUlRate
+	m.TotalDownloaded = c.totalDownloaded
+	m.TotalUploaded = c.totalUploaded
+	m.SessionDownloaded = c.lastClientRead
+	m.SessionUploaded = c.lastClientWritten
+	m.MaxDownloadRate = c.cfg.MaxDownloadRate
+	m.MaxUploadRate = c.cfg.MaxUploadRate
+	m.MonthlyDataLimitBytes = c.cfg.MonthlyDataLimitBytes
+
+	if c.store != nil {
+		if bs, err := c.store.GetBandwidthStats(); err == nil {
+			m.MonthlyDownloaded = bs.MonthlyDownloadedBytes
+			m.MonthlyUploaded = bs.MonthlyUploadedBytes
+			m.MonthlyTotalUsed = bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes
+			m.CurrentMonth = bs.CurrentMonth
+			if c.cfg.MonthlyDataLimitBytes > 0 && m.MonthlyTotalUsed >= c.cfg.MonthlyDataLimitBytes {
+				m.MonthlyLimitExceeded = true
+			}
+		}
+	}
+	c.bwMu.Unlock()
+
 	return m
 }
 

@@ -47,6 +47,14 @@ type Stats struct {
 	DBSizeBytes       int64 `json:"db_size_bytes"`
 }
 
+type BandwidthStats struct {
+	TotalDownloadedBytes   int64  `json:"total_downloaded_bytes"`
+	TotalUploadedBytes     int64  `json:"total_uploaded_bytes"`
+	MonthlyDownloadedBytes int64  `json:"monthly_downloaded_bytes"`
+	MonthlyUploadedBytes   int64  `json:"monthly_uploaded_bytes"`
+	CurrentMonth           string `json:"current_month"`
+}
+
 type SearchFilter struct {
 	Query             string `json:"query"`
 	Category          string `json:"category"`
@@ -176,6 +184,24 @@ func (s *Store) initSchema() error {
 
 	// Ensure DHT records have at least 1 seeder since an announcer reached our node
 	_, _ = s.db.Exec("UPDATE torrents SET seeders = 1 WHERE source = 'dht' AND seeders <= 0")
+
+	// Bandwidth stats persistent storage table with monthly tracking
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS bandwidth_stats (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+			uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+			monthly_downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+			monthly_uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+			current_month TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME NOT NULL
+		);
+		INSERT OR IGNORE INTO bandwidth_stats (id, downloaded_bytes, uploaded_bytes, monthly_downloaded_bytes, monthly_uploaded_bytes, current_month, updated_at)
+		VALUES (1, 0, 0, 0, 0, strftime('%Y-%m', 'now'), CURRENT_TIMESTAMP);
+	`)
+	_, _ = s.db.Exec("ALTER TABLE bandwidth_stats ADD COLUMN monthly_downloaded_bytes INTEGER NOT NULL DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE bandwidth_stats ADD COLUMN monthly_uploaded_bytes INTEGER NOT NULL DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE bandwidth_stats ADD COLUMN current_month TEXT NOT NULL DEFAULT ''")
 
 	// Asynchronously backfill tags and spam checks for existing records
 	go s.backfillMetadataTags()
@@ -659,6 +685,74 @@ func (s *Store) GetStats() (Stats, error) {
 		st.DBSizeBytes = s.getDiskSize()
 	}
 	return st, err
+}
+
+func (s *Store) GetBandwidthStats() (BandwidthStats, error) {
+	var bs BandwidthStats
+	nowMonth := time.Now().UTC().Format("2006-01")
+	row := s.db.QueryRow(`
+		SELECT downloaded_bytes, uploaded_bytes, COALESCE(monthly_downloaded_bytes, 0), COALESCE(monthly_uploaded_bytes, 0), COALESCE(current_month, '')
+		FROM bandwidth_stats
+		WHERE id = 1
+	`)
+	err := row.Scan(&bs.TotalDownloadedBytes, &bs.TotalUploadedBytes, &bs.MonthlyDownloadedBytes, &bs.MonthlyUploadedBytes, &bs.CurrentMonth)
+	if err != nil {
+		return bs, err
+	}
+
+	// If calendar month rolled over, reset monthly counters
+	if bs.CurrentMonth != nowMonth {
+		_, _ = s.db.Exec(`
+			UPDATE bandwidth_stats
+			SET monthly_downloaded_bytes = 0,
+			    monthly_uploaded_bytes = 0,
+			    current_month = ?,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = 1
+		`, nowMonth)
+		bs.MonthlyDownloadedBytes = 0
+		bs.MonthlyUploadedBytes = 0
+		bs.CurrentMonth = nowMonth
+	}
+
+	return bs, nil
+}
+
+func (s *Store) AddBandwidthStats(downloadedBytes, uploadedBytes int64) error {
+	if downloadedBytes <= 0 && uploadedBytes <= 0 {
+		return nil
+	}
+	nowMonth := time.Now().UTC().Format("2006-01")
+
+	// Check if month rolled over
+	var currentMonth string
+	_ = s.db.QueryRow(`SELECT COALESCE(current_month, '') FROM bandwidth_stats WHERE id = 1`).Scan(&currentMonth)
+
+	if currentMonth != nowMonth {
+		_, err := s.db.Exec(`
+			UPDATE bandwidth_stats
+			SET downloaded_bytes = downloaded_bytes + ?,
+			    uploaded_bytes = uploaded_bytes + ?,
+			    monthly_downloaded_bytes = ?,
+			    monthly_uploaded_bytes = ?,
+			    current_month = ?,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = 1
+		`, downloadedBytes, uploadedBytes, downloadedBytes, uploadedBytes, nowMonth)
+		return err
+	}
+
+	_, err := s.db.Exec(`
+		UPDATE bandwidth_stats 
+		SET downloaded_bytes = downloaded_bytes + ?,
+		    uploaded_bytes = uploaded_bytes + ?,
+		    monthly_downloaded_bytes = monthly_downloaded_bytes + ?,
+		    monthly_uploaded_bytes = monthly_uploaded_bytes + ?,
+		    current_month = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, downloadedBytes, uploadedBytes, downloadedBytes, uploadedBytes, nowMonth)
+	return err
 }
 
 func (s *Store) getDiskSize() int64 {
