@@ -604,6 +604,12 @@ func guessCategory(name string, files []string) string {
 	for _, f := range files {
 		lower += " " + f
 	}
+
+	// Adult / XXX content detection (checked first before generic Video)
+	if isAdultContent(lower) {
+		return "XXX"
+	}
+
 	switch {
 	case containsAny(lower, ".mkv", ".mp4", ".avi", "1080p", "720p", "2160p", "4k", "bluray", "web-dl", "x264", "x265"):
 		return "Video"
@@ -616,6 +622,46 @@ func guessCategory(name string, files []string) string {
 	default:
 		return "Other"
 	}
+}
+
+func isAdultContent(s string) bool {
+	// Common keywords, studios, and acronyms for adult/XXX releases
+	adultKeywords := []string{
+		"xxx", "porn", "adult", "hentai", "erotica", "jav", "brazzers", "bangbros",
+		"naughtyamerica", "realitykings", "blacked", "vixen", "tushy", "mofos",
+		"passion-hd", "puremature", "rk-prime", "evilangel", "wicked", "digitalplayground",
+		"sweetsinner", "twistys", "teamskeet", "femjoy", "met-art", "nubiles",
+		"onlyfans", "manyvids", "fansly", "camsoda", "chaturbate", "stripper",
+		"blowjob", "creampie", "milf", "anal", "threesome", "gangbang", "fetish",
+		"bdsm", "hardcore", "softcore", "uncensored", "leaked", "babes",
+	}
+
+	for _, kw := range adultKeywords {
+		if containsWord(s, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWord(s, word string) bool {
+	// Look for word bounded by non-alphanumeric delimiters (dots, spaces, dashes, brackets, etc.)
+	sLen := len(s)
+	wLen := len(word)
+	for i := 0; i+wLen <= sLen; i++ {
+		if s[i:i+wLen] == word {
+			leftBoundary := (i == 0) || !isAlphaNum(s[i-1])
+			rightBoundary := (i+wLen == sLen) || !isAlphaNum(s[i+wLen])
+			if leftBoundary && rightBoundary {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isAlphaNum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func containsAny(s string, substrs ...string) bool {

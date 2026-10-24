@@ -227,6 +227,18 @@ func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 			{
+				ID: 6000, Name: "XXX",
+				SubCat: []CapsSubCat{
+					{ID: 6010, Name: "DVD"},
+					{ID: 6020, Name: "WMV"},
+					{ID: 6030, Name: "XviD"},
+					{ID: 6040, Name: "x264"},
+					{ID: 6050, Name: "UHD"},
+					{ID: 6060, Name: "Other"},
+					{ID: 6070, Name: "Imageset"},
+				},
+			},
+			{
 				ID: 8000, Name: "Other",
 				SubCat: []CapsSubCat{
 					{ID: 8010, Name: "Misc"},
@@ -359,6 +371,8 @@ func mapCategoryToTorznab(cat string) int {
 		return 4000
 	case "books", "book":
 		return 7000
+	case "xxx", "adult", "porn":
+		return 6000
 	default:
 		return 8000
 	}
@@ -372,6 +386,8 @@ func mapTorznabToInternalCategory(cat string) string {
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		switch {
+		case strings.HasPrefix(p, "6"):
+			return "XXX"
 		case strings.HasPrefix(p, "2") || strings.HasPrefix(p, "5"):
 			return "Video"
 		case strings.HasPrefix(p, "3"):

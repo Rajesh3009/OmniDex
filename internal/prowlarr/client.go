@@ -98,7 +98,13 @@ func (c *Client) Search(query string, limit int) ([]SearchResultItem, error) {
 func (item *SearchResultItem) ToRecord() db.TorrentRecord {
 	category := "Other"
 	if len(item.Categories) > 0 {
-		category = item.Categories[0].Name
+		rawCat := item.Categories[0].Name
+		lowerCat := strings.ToLower(rawCat)
+		if strings.Contains(lowerCat, "xxx") || strings.Contains(lowerCat, "adult") || strings.Contains(lowerCat, "porn") || item.Categories[0].ID == 6000 || (item.Categories[0].ID >= 6000 && item.Categories[0].ID < 7000) {
+			category = "XXX"
+		} else {
+			category = rawCat
+		}
 	}
 
 	magnet := item.MagnetURL

@@ -1068,6 +1068,10 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     catColor = '#34d399';
     catBg = 'rgba(16, 185, 129, 0.15)';
     catBorder = 'rgba(16, 185, 129, 0.3)';
+  } else if (cat === 'XXX') {
+    catColor = '#fb7185';
+    catBg = 'rgba(244, 63, 94, 0.15)';
+    catBorder = 'rgba(244, 63, 94, 0.35)';
   }
   const catBadge = `<span class="badge" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" onclick="event.stopPropagation(); setCategoryFilter('${escapeHtml(cat)}')" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
 
