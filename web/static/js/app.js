@@ -1135,8 +1135,10 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
       </button>
     </td>
     <td class="peers-cell" data-label="Peers">
-      <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
-      <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
+      <div class="peer-badges">
+        <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
+        <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
+      </div>
     </td>
     <td data-label="Source">${sourceBadge}</td>
     <td data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>

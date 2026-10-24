@@ -859,7 +859,7 @@ body {
 }
 
 /* Peer Badges (Seeders & Leechers) */
-.peers-cell {
+.peer-badges {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1537,17 +1537,6 @@ body {
     padding: 6px 0;
     border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
     font-size: 0.85rem;
-  }
-
-  .torrent-table td.peers-cell {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  .torrent-table td.peers-cell::before {
-    margin-right: auto;
   }
 
   .torrent-table td:last-child {
