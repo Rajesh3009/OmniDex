@@ -2,6 +2,7 @@ package sysinfo
 
 import (
 	"runtime"
+	"runtime/debug"
 	"sync"
 )
 
@@ -61,4 +62,11 @@ func GetMemoryStats() MemoryStats {
 		NumGC:           m.NumGC,
 		NumGoroutine:    runtime.NumGoroutine(),
 	}
+}
+
+// FreeMemory manually triggers garbage collection and instructs the Go runtime
+// to release idle virtual memory pages back to the operating system.
+func FreeMemory() {
+	runtime.GC()
+	debug.FreeOSMemory()
 }

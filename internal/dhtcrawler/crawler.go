@@ -86,6 +86,40 @@ type DHTGraphData struct {
 	Links []GraphLink `json:"links"`
 }
 
+type boundedCache struct {
+	mu      sync.Mutex
+	items   map[string]time.Time
+	order   []string
+	maxSize int
+}
+
+func newBoundedCache(maxSize int) *boundedCache {
+	return &boundedCache{
+		items:   make(map[string]time.Time, maxSize),
+		order:   make([]string, 0, maxSize),
+		maxSize: maxSize,
+	}
+}
+
+func (b *boundedCache) HasOrAdd(key string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.items[key]; exists {
+		return true
+	}
+
+	if len(b.order) >= b.maxSize {
+		oldest := b.order[0]
+		b.order = b.order[1:]
+		delete(b.items, oldest)
+	}
+
+	b.items[key] = time.Now()
+	b.order = append(b.order, key)
+	return false
+}
+
 type Crawler struct {
 	cfg       CrawlerConfig
 	store     *db.Store
@@ -93,7 +127,7 @@ type Crawler struct {
 	dhtServer *dht.Server
 
 	workChan chan AnnounceJob
-	visited  sync.Map // hash string -> timestamp
+	visited  *boundedCache
 
 	metrics Metrics
 	ctx     context.Context
@@ -203,6 +237,7 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 		cfg:             cfg,
 		store:           store,
 		workChan:        make(chan AnnounceJob, 2500),
+		visited:         newBoundedCache(15000),
 		ctx:             ctx,
 		cancel:          cancel,
 		downloadLimiter: dlLimiter,
@@ -332,6 +367,7 @@ func (c *Crawler) Start() {
 				// Without shuffling, the crawler exhausts the same stale peers every tick.
 				rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
 
+				querySem := make(chan struct{}, 20)
 				// Sample across up to 15 randomly selected nodes in the table each tick
 				for i := 0; i < len(nodes) && i < 15; i++ {
 					node := nodes[i]
@@ -342,37 +378,47 @@ func (c *Crawler) Start() {
 					targetID := int160.FromByteArray(randTarget)
 
 					// 1. Send find_node to discover further nodes and insert into table
-					go func(addr dht.Addr, target int160.T) {
-						c.dhtServer.FindNode(addr, target, dht.QueryRateLimiting{NotAny: true})
-					}(nodeAddr, targetID)
+					select {
+					case querySem <- struct{}{}:
+						go func(addr dht.Addr, target int160.T) {
+							defer func() { <-querySem }()
+							c.dhtServer.FindNode(addr, target, dht.QueryRateLimiting{NotAny: true})
+						}(nodeAddr, targetID)
+					default:
+					}
 
 					// 2. Send BEP 51 sample_infohashes query directly to harvest torrent hashes
-					go func(addr dht.Addr, target [20]byte, peerIP net.IP, peerPort int) {
-						ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
-						defer cancel()
+					select {
+					case querySem <- struct{}{}:
+						go func(addr dht.Addr, target [20]byte, peerIP net.IP, peerPort int) {
+							defer func() { <-querySem }()
+							ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
+							defer cancel()
 
-						res := c.dhtServer.Query(ctx, addr, "sample_infohashes", dht.QueryInput{
-							MsgArgs: krpc.MsgArgs{
-								Target: target,
-							},
-							RateLimiting: dht.QueryRateLimiting{NotAny: true},
-						})
+							res := c.dhtServer.Query(ctx, addr, "sample_infohashes", dht.QueryInput{
+								MsgArgs: krpc.MsgArgs{
+									Target: target,
+								},
+								RateLimiting: dht.QueryRateLimiting{NotAny: true},
+							})
 
-						if res.Err == nil && res.Reply.R != nil {
-							// Ingest new nodes discovered from response
-							for _, n := range res.Reply.R.Nodes {
-								_ = c.dhtServer.AddNode(n)
-							}
+							if res.Err == nil && res.Reply.R != nil {
+								// Ingest new nodes discovered from response
+								for _, n := range res.Reply.R.Nodes {
+									_ = c.dhtServer.AddNode(n)
+								}
 
-							// Ingest all sampled infohashes returned by the peer
-							if res.Reply.R.Samples != nil {
-								for _, sample := range *res.Reply.R.Samples {
-									atomic.AddInt64(&c.metrics.AnnouncesReceived, 1)
-									c.enqueue(metainfo.Hash(sample), peerIP, peerPort)
+								// Ingest all sampled infohashes returned by the peer
+								if res.Reply.R.Samples != nil {
+									for _, sample := range *res.Reply.R.Samples {
+										atomic.AddInt64(&c.metrics.AnnouncesReceived, 1)
+										c.enqueue(metainfo.Hash(sample), peerIP, peerPort)
+									}
 								}
 							}
-						}
-					}(nodeAddr, randTarget, node.Addr.IP, node.Addr.Port)
+						}(nodeAddr, randTarget, node.Addr.IP, node.Addr.Port)
+					default:
+					}
 				}
 			}
 		}
@@ -381,29 +427,6 @@ func (c *Crawler) Start() {
 	for i := 0; i < c.cfg.Workers; i++ {
 		go c.worker(i)
 	}
-
-	// Cache pruning routine (prevents unbounded memory growth).
-	// Fix #4: run every 10 minutes instead of 30 to reduce GC pressure which
-	// can delay the torrent client's peer connection goroutines.
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case <-ticker.C:
-				now := time.Now()
-				c.visited.Range(func(key, val any) bool {
-					t, ok := val.(time.Time)
-					if ok && now.Sub(t) > 1*time.Hour {
-						c.visited.Delete(key)
-					}
-					return true
-				})
-			}
-		}
-	}()
 }
 
 func (c *Crawler) flushBandwidthLocked() {
@@ -438,7 +461,7 @@ func (c *Crawler) enqueue(hash metainfo.Hash, ip net.IP, port int) {
 	}
 
 	hashHex := hex.EncodeToString(hash[:])
-	if _, loaded := c.visited.LoadOrStore(hashHex, time.Now()); loaded {
+	if c.visited.HasOrAdd(hashHex) {
 		return
 	}
 

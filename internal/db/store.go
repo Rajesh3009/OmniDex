@@ -22,7 +22,8 @@ type TorrentRecord struct {
 	FilesJSON    string    `json:"files_json,omitempty"`
 	PieceLength  int64     `json:"piece_length"`
 	CreatedTime  time.Time `json:"created_time"`
-	Source       string    `json:"source"` // "dht" or "prowlarr"
+	LastSeen     time.Time `json:"last_seen"`
+	Source       string    `json:"source"` // "dht" or "prowlarr" or "feed"
 	Seeders      int       `json:"seeders"`
 	Leechers     int       `json:"leechers"`
 	Category     string    `json:"category"`
@@ -42,6 +43,7 @@ type Stats struct {
 	TotalTorrents     int64 `json:"total_torrents"`
 	DHTCount          int64 `json:"dht_count"`
 	ProwlarrCount     int64 `json:"prowlarr_count"`
+	FeedCount         int64 `json:"feed_count"`
 	SuspiciousCount   int64 `json:"suspicious_count"`
 	TotalSizeBytes    int64 `json:"total_size_bytes"`
 	DBSizeBytes       int64 `json:"db_size_bytes"`
@@ -77,15 +79,15 @@ type Store struct {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	// Enable WAL mode, 64MB cache, memory temp store, memory mapping and busy timeout
-	connStr := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)", dbPath)
+	// Optimized pragmas: WAL mode, 8MB cache per connection, 32MB max mmap, busy timeout
+	connStr := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=cache_size(-8000)&_pragma=mmap_size(33554432)&_pragma=temp_store(MEMORY)", dbPath)
 	db, err := sql.Open("sqlite", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db.SetMaxOpenConns(10) // High concurrency WAL readers
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(4) // Controlled connection pool to prevent cache proliferation
+	db.SetMaxIdleConns(2)
 
 	s := &Store{db: db, dbPath: dbPath}
 	if err := s.initSchema(); err != nil {
@@ -110,6 +112,7 @@ func (s *Store) initSchema() error {
 		files_json TEXT,
 		piece_length INTEGER DEFAULT 0,
 		created_time DATETIME NOT NULL,
+		last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		source TEXT NOT NULL DEFAULT 'dht',
 		seeders INTEGER DEFAULT 0,
 		leechers INTEGER DEFAULT 0,
@@ -161,6 +164,7 @@ func (s *Store) initSchema() error {
 
 	// Schema migrations for existing databases
 	columns := []string{
+		"ALTER TABLE torrents ADD COLUMN last_seen DATETIME DEFAULT CURRENT_TIMESTAMP",
 		"ALTER TABLE torrents ADD COLUMN resolution TEXT DEFAULT ''",
 		"ALTER TABLE torrents ADD COLUMN codec TEXT DEFAULT ''",
 		"ALTER TABLE torrents ADD COLUMN quality TEXT DEFAULT ''",
@@ -175,7 +179,11 @@ func (s *Store) initSchema() error {
 		_, _ = s.db.Exec(colSQL)
 	}
 
+	// Backfill last_seen for legacy records where null or empty
+	_, _ = s.db.Exec("UPDATE torrents SET last_seen = created_time WHERE last_seen IS NULL OR last_seen = ''")
+
 	// Create indices for new columns after ensuring columns exist
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_last_seen ON torrents(last_seen DESC)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_res ON torrents(resolution)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_codec ON torrents(codec)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_qual ON torrents(quality)")
@@ -277,6 +285,9 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 	if t.CreatedTime.IsZero() {
 		t.CreatedTime = time.Now().UTC()
 	}
+	if t.LastSeen.IsZero() {
+		t.LastSeen = time.Now().UTC()
+	}
 
 	isSuspInt := 0
 	if t.IsSuspicious {
@@ -285,14 +296,15 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 
 	query := `
 	INSERT INTO torrents (
-		info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri,
+		info_hash, name, size, file_count, files_json, piece_length, created_time, last_seen, source, seeders, leechers, category, magnet_uri,
 		resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, spam_reasons
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(info_hash) DO UPDATE SET
 		name = CASE WHEN excluded.name != '' THEN excluded.name ELSE torrents.name END,
 		size = CASE WHEN excluded.size > 0 THEN excluded.size ELSE torrents.size END,
 		file_count = CASE WHEN excluded.file_count > 0 THEN excluded.file_count ELSE torrents.file_count END,
 		files_json = CASE WHEN excluded.files_json != '' THEN excluded.files_json ELSE torrents.files_json END,
+		last_seen = CURRENT_TIMESTAMP,
 		seeders = CASE WHEN excluded.seeders > 0 THEN excluded.seeders ELSE torrents.seeders END,
 		leechers = CASE WHEN excluded.leechers > 0 THEN excluded.leechers ELSE torrents.leechers END,
 		category = CASE WHEN excluded.category != '' THEN excluded.category ELSE torrents.category END,
@@ -315,6 +327,7 @@ func (s *Store) UpsertTorrent(t *TorrentRecord) error {
 		t.FilesJSON,
 		t.PieceLength,
 		t.CreatedTime.Format("2006-01-02 15:04:05"),
+		t.LastSeen.Format("2006-01-02 15:04:05"),
 		t.Source,
 		t.Seeders,
 		t.Leechers,
@@ -676,11 +689,12 @@ func (s *Store) GetStats() (Stats, error) {
 			COUNT(1),
 			COALESCE(SUM(CASE WHEN source = 'dht' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN source = 'prowlarr' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN source NOT IN ('dht', 'prowlarr') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN is_suspicious = 1 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(size), 0)
 		FROM torrents
 	`)
-	err := row.Scan(&st.TotalTorrents, &st.DHTCount, &st.ProwlarrCount, &st.SuspiciousCount, &st.TotalSizeBytes)
+	err := row.Scan(&st.TotalTorrents, &st.DHTCount, &st.ProwlarrCount, &st.FeedCount, &st.SuspiciousCount, &st.TotalSizeBytes)
 	if err == nil {
 		st.DBSizeBytes = s.getDiskSize()
 	}
@@ -825,4 +839,129 @@ func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	r.IsSuspicious = isSuspInt == 1
 	r.CreatedTime = parseDBTime(createdStr)
 	return &r, nil
+}
+
+// PruneMemory forces SQLite to checkpoint the WAL log and release unused page cache
+func (s *Store) PruneMemory() {
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(PASSIVE)")
+	_, _ = s.db.Exec("PRAGMA shrink_memory")
+}
+
+// DeleteTorrent removes a torrent from SQLite. The FTS5 trigger automatically cleans up torrents_fts.
+func (s *Store) DeleteTorrent(infoHash string) error {
+	cleanHash := strings.ToLower(strings.TrimSpace(infoHash))
+	if cleanHash == "" {
+		return fmt.Errorf("empty info_hash")
+	}
+	res, err := s.db.Exec("DELETE FROM torrents WHERE LOWER(info_hash) = ?", cleanHash)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("torrent not found")
+	}
+	return nil
+}
+
+type PruneOptions struct {
+	MaxSeeders int       `json:"max_seeders"` // e.g. 0
+	OlderThan  time.Time `json:"older_than"`  // e.g. created/last_seen older than X days
+	Source     string    `json:"source"`      // "" for any, or "dht", "prowlarr", "feed"
+	PruneSpam  bool      `json:"prune_spam"`  // also prune is_suspicious == 1
+}
+
+// PruneTorrents removes dead torrents according to the specified options
+func (s *Store) PruneTorrents(opts PruneOptions) (int64, error) {
+	var where []string
+	var args []any
+
+	if opts.PruneSpam {
+		where = append(where, "(seeders <= ? OR is_suspicious = 1)")
+		args = append(args, opts.MaxSeeders)
+	} else {
+		where = append(where, "seeders <= ?")
+		args = append(args, opts.MaxSeeders)
+	}
+
+	if !opts.OlderThan.IsZero() {
+		where = append(where, "created_time <= ?")
+		args = append(args, opts.OlderThan.Format("2006-01-02 15:04:05"))
+	}
+
+	if opts.Source != "" && !strings.EqualFold(opts.Source, "all") {
+		where = append(where, "source = ?")
+		args = append(args, strings.ToLower(opts.Source))
+	}
+
+	query := "DELETE FROM torrents"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	// Shrink memory and checkpoint after pruning
+	s.PruneMemory()
+
+	return affected, nil
+}
+
+// CountDeadTorrents returns the number of torrents that match the dead torrent criteria
+func (s *Store) CountDeadTorrents(maxSeeders int, olderThan time.Time) (int64, error) {
+	var count int64
+	query := "SELECT COUNT(1) FROM torrents WHERE seeders <= ?"
+	args := []any{maxSeeders}
+	if !olderThan.IsZero() {
+		query += " AND created_time <= ?"
+		args = append(args, olderThan.Format("2006-01-02 15:04:05"))
+	}
+	err := s.db.QueryRow(query, args...).Scan(&count)
+	return count, err
+}
+
+// UpdatePeerCount updates the seeders and leechers count for an existing torrent and bumps last_seen
+func (s *Store) UpdatePeerCount(infoHash string, seeders, leechers int) error {
+	cleanHash := strings.ToLower(strings.TrimSpace(infoHash))
+	_, err := s.db.Exec(`
+		UPDATE torrents
+		SET seeders = ?, leechers = ?, last_seen = CURRENT_TIMESTAMP
+		WHERE LOWER(info_hash) = ?
+	`, seeders, leechers, cleanHash)
+	return err
+}
+
+// GetOldestTorrents retrieves up to limit torrents with the oldest last_seen for dead torrent verification
+func (s *Store) GetOldestTorrents(limit int) ([]TorrentRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri
+		FROM torrents
+		ORDER BY last_seen ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []TorrentRecord
+	for rows.Next() {
+		var r TorrentRecord
+		var createdStr string
+		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err == nil {
+			r.CreatedTime = parseDBTime(createdStr)
+			results = append(results, r)
+		}
+	}
+	return results, nil
 }

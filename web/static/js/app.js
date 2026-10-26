@@ -221,6 +221,20 @@ function initEventListeners() {
     fetchAndRenderGraph();
   });
 
+  document.getElementById('btn-clean-dead')?.addEventListener('click', () => {
+    openModal('modal-prune-dead');
+    updatePrunePreview();
+  });
+
+  document.getElementById('btn-quick-free-ram')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerMemoryShrink();
+  });
+
+  document.getElementById('btn-janitor-shrink')?.addEventListener('click', () => {
+    triggerMemoryShrink();
+  });
+
   document.getElementById('btn-show-feed')?.addEventListener('click', () => {
     const origin = window.location.origin;
     const rssEl = document.getElementById('feed-rss-url');
@@ -236,6 +250,197 @@ function initEventListeners() {
 
   document.getElementById('btn-show-settings').addEventListener('click', () => {
     openModal('modal-settings');
+    loadFeedsList();
+  });
+
+  // Settings Tabs
+  document.querySelectorAll('.settings-tabs .tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.settings-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+      btn.classList.add('active');
+      const targetId = btn.getAttribute('data-tab');
+      const panel = document.getElementById(targetId);
+      if (panel) panel.style.display = 'block';
+      if (targetId === 'tab-feeds') {
+        loadFeedsList();
+      }
+    });
+  });
+
+  // Clean Dead Torrents Form & Preview
+  ['prune-days-select', 'prune-source-select', 'prune-include-spam'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updatePrunePreview);
+  });
+
+  let isPruningDead = false;
+  async function handleExecutePrune(e) {
+    if (e) e.preventDefault();
+    if (isPruningDead) return;
+
+    const btn = document.getElementById('btn-execute-prune');
+    const msg = document.getElementById('prune-status-msg');
+    const daysEl = document.getElementById('prune-days-select');
+    const sourceEl = document.getElementById('prune-source-select');
+    const spamEl = document.getElementById('prune-include-spam');
+
+    const days = daysEl ? parseInt(daysEl.value, 10) : 14;
+    const source = sourceEl ? sourceEl.value : 'all';
+    const pruneSpam = spamEl ? spamEl.checked : false;
+
+    isPruningDead = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.originalText = btn.innerHTML;
+      btn.innerHTML = '⏳ Purging Torrents...';
+    }
+    if (msg) {
+      msg.style.display = 'block';
+      msg.style.background = 'rgba(6, 182, 212, 0.15)';
+      msg.style.color = 'var(--accent-cyan)';
+      msg.textContent = 'Purging dead torrents and optimizing SQLite database...';
+    }
+
+    try {
+      const res = await fetch('/api/v1/torrents/prune', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, max_seeders: 0, source, prune_spam: pruneSpam })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (msg) {
+          msg.style.background = 'rgba(16, 185, 129, 0.15)';
+          msg.style.color = '#34d399';
+          msg.textContent = `✓ Successfully deleted ${data.deleted} dead torrent${data.deleted === 1 ? '' : 's'}!`;
+        }
+        updatePrunePreview();
+        performSearch(undefined, false);
+        loadStats();
+        setTimeout(() => {
+          closeModal('modal-prune-dead');
+          if (msg) msg.style.display = 'none';
+        }, 1500);
+      } else {
+        throw new Error(data.error || 'Failed to prune torrents');
+      }
+    } catch (err) {
+      if (msg) {
+        msg.style.background = 'rgba(239, 68, 68, 0.15)';
+        msg.style.color = '#f87171';
+        msg.textContent = 'Error: ' + err.message;
+      }
+    } finally {
+      isPruningDead = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = btn.dataset.originalText || '🗑️ Purge Matching Torrents';
+      }
+    }
+  }
+
+  document.getElementById('prune-dead-form')?.addEventListener('submit', handleExecutePrune);
+  document.getElementById('btn-execute-prune')?.addEventListener('click', handleExecutePrune);
+
+  // Direct Torrent Import
+  document.getElementById('btn-execute-import')?.addEventListener('click', async () => {
+    const inputEl = document.getElementById('import-input');
+    const nameEl = document.getElementById('import-name');
+    const msg = document.getElementById('import-status-msg');
+    const inputVal = inputEl?.value.trim();
+    if (!inputVal) {
+      alert('Please enter a magnet link or 40-character infohash');
+      return;
+    }
+
+    if (msg) {
+      msg.style.display = 'block';
+      msg.style.background = 'rgba(6, 182, 212, 0.15)';
+      msg.style.color = 'var(--accent-cyan)';
+      msg.textContent = 'Importing torrent...';
+    }
+
+    try {
+      const res = await fetch('/api/v1/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: inputVal, name: nameEl?.value.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        msg.style.background = 'rgba(16, 185, 129, 0.15)';
+        msg.style.color = '#34d399';
+        msg.textContent = `✓ Imported: ${data.torrent.name}`;
+        if (inputEl) inputEl.value = '';
+        if (nameEl) nameEl.value = '';
+        performSearch(undefined, false);
+        loadStats();
+      } else {
+        throw new Error(data.error || 'Import failed');
+      }
+    } catch (err) {
+      if (msg) {
+        msg.style.background = 'rgba(239, 68, 68, 0.15)';
+        msg.style.color = '#f87171';
+        msg.textContent = 'Error: ' + err.message;
+      }
+    }
+  });
+
+  // Feeds Management Listeners
+  document.getElementById('btn-sync-all-feeds')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-sync-all-feeds');
+    if (btn) btn.textContent = '🔄 Syncing...';
+    try {
+      const res = await fetch('/api/v1/feeds/sync', { method: 'POST' });
+      const data = await res.json();
+      alert(`Sync finished! Added ${data.added} new torrents.`);
+      loadFeedsList();
+      performSearch(undefined, false);
+      loadStats();
+    } catch (e) {
+      alert('Sync failed: ' + e.message);
+    } finally {
+      if (btn) btn.textContent = '🔄 Sync All Feeds Now';
+    }
+  });
+
+  document.getElementById('btn-add-feed')?.addEventListener('click', async () => {
+    const name = document.getElementById('new-feed-name')?.value.trim();
+    const type = document.getElementById('new-feed-type')?.value;
+    const url = document.getElementById('new-feed-url')?.value.trim();
+    const apiKey = document.getElementById('new-feed-apikey')?.value.trim();
+    const interval = parseInt(document.getElementById('new-feed-interval')?.value, 10) || 30;
+
+    if (!name || !url) {
+      alert('Please provide both Feed Name and Feed URL');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/v1/feeds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type, url, api_key: apiKey, interval_minutes: interval, enabled: true })
+      });
+      if (res.ok) {
+        document.getElementById('new-feed-name').value = '';
+        document.getElementById('new-feed-url').value = '';
+        document.getElementById('new-feed-apikey').value = '';
+        loadFeedsList();
+      } else {
+        alert('Failed to add feed');
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  });
+
+  // Single Torrent Details Delete Button
+  document.getElementById('btn-delete-torrent')?.addEventListener('click', () => {
+    if (currentDetailTorrent) {
+      deleteTorrentPrompt(currentDetailTorrent.info_hash, currentDetailTorrent.name);
+    }
   });
 
   document.querySelectorAll('[data-close]').forEach(btn => {
@@ -267,7 +472,9 @@ function initEventListeners() {
       dht_workers: parseInt(document.getElementById('cfg-dht-workers').value, 10) || 15,
       max_download_rate: Math.max(0, Math.round(dlKb * 1024)),
       max_upload_rate: Math.max(0, Math.round(ulKb * 1024)),
-      monthly_data_limit_bytes: Math.max(0, Math.round(monthlyGb * 1024 * 1024 * 1024))
+      monthly_data_limit_bytes: Math.max(0, Math.round(monthlyGb * 1024 * 1024 * 1024)),
+      auto_prune_dead: document.getElementById('cfg-auto-prune-dead')?.checked || false,
+      auto_prune_days: parseInt(document.getElementById('cfg-auto-prune-days')?.value, 10) || 30
     };
 
     try {
@@ -728,6 +935,15 @@ async function loadConfig() {
 
     document.getElementById('torznab-key-display').textContent = cfg.torznab_api_key || 'N/A';
     document.getElementById('torznab-url-display').textContent = `${window.location.origin}/api/v1/torznab`;
+
+    const autoPruneCheck = document.getElementById('cfg-auto-prune-dead');
+    if (autoPruneCheck) {
+      autoPruneCheck.checked = !!cfg.auto_prune_dead;
+    }
+    const autoPruneDays = document.getElementById('cfg-auto-prune-days');
+    if (autoPruneDays && cfg.auto_prune_days) {
+      autoPruneDays.value = cfg.auto_prune_days;
+    }
   } catch (e) {
     console.error('Config fetch error:', e);
   }
@@ -1042,9 +1258,14 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     tr.style.display = 'none'; // Initially collapsed
   }
 
-  const sourceBadge = item.source === 'prowlarr' 
-    ? '<span class="badge badge-prowlarr">Prowlarr</span>'
-    : '<span class="badge badge-dht">DHT Wire</span>';
+  let sourceBadge = '<span class="badge badge-dht">DHT Wire</span>';
+  if (item.source === 'prowlarr') {
+    sourceBadge = '<span class="badge badge-prowlarr">Prowlarr</span>';
+  } else if (item.source === 'manual') {
+    sourceBadge = '<span class="badge" style="color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3);">Manual</span>';
+  } else if (item.source && item.source !== 'dht') {
+    sourceBadge = `<span class="badge" style="color: #fb923c; background: rgba(251, 146, 60, 0.15); border: 1px solid rgba(251, 146, 60, 0.3);" title="Source: ${escapeHtml(item.source)}">${escapeHtml(item.source)}</span>`;
+  }
 
   const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
 
@@ -1146,6 +1367,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
       <div class="action-btns" style="justify-content: flex-end;">
         <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
         <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
+        <button class="btn-icon btn-icon-delete" onclick="event.stopPropagation(); deleteTorrentPrompt('${item.info_hash}', '${escapeHtml(item.name).replace(/'/g, "\\'")}')" title="Delete from database">🗑️</button>
       </div>
     </td>
   `;
@@ -1186,9 +1408,11 @@ function getFileIcon(filename) {
 }
 
 let activeDetailFiles = [];
+let currentDetailTorrent = null;
 
 async function openTorrentDetails(item) {
   if (!item) return;
+  currentDetailTorrent = item;
 
   document.getElementById('detail-title').textContent = item.name;
   document.getElementById('detail-hash').textContent = item.info_hash;
@@ -1654,5 +1878,162 @@ function setupCanvasInteractions(canvas) {
     const ctx = canvas.getContext('2d');
     renderCanvas(ctx, canvas.width, canvas.height);
   };
+}
+
+async function deleteTorrentPrompt(hash, name) {
+  if (!confirm(`Are you sure you want to permanently delete this torrent from the database and search index?\n\n"${name}"\n(${hash})`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(hash)}`, { method: 'DELETE' });
+    if (res.ok) {
+      closeModal('modal-details');
+      performSearch(undefined, false);
+      loadStats();
+    } else {
+      const err = await res.text();
+      alert('Failed to delete torrent: ' + err);
+    }
+  } catch (e) {
+    alert('Error deleting torrent: ' + e.message);
+  }
+}
+
+async function triggerMemoryShrink() {
+  const ramEl = document.getElementById('stat-ram-usage');
+  const origText = ramEl ? ramEl.textContent : '';
+  if (ramEl) ramEl.textContent = 'Freeing...';
+
+  try {
+    const res = await fetch('/api/v1/memory/shrink', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      loadStats();
+      updateJanitorStats(data.memory);
+    }
+  } catch (e) {
+    console.error('Memory shrink failed:', e);
+    if (ramEl) ramEl.textContent = origText;
+  }
+}
+
+function updateJanitorStats(mem) {
+  if (!mem) return;
+  const rssEl = document.getElementById('janitor-rss');
+  const heapEl = document.getElementById('janitor-heap');
+  const sysEl = document.getElementById('janitor-sys');
+  const goroutinesEl = document.getElementById('janitor-goroutines');
+
+  if (rssEl) rssEl.textContent = formatBytes(mem.rss_bytes || mem.alloc_bytes);
+  if (heapEl) heapEl.textContent = formatBytes(mem.heap_inuse_bytes || mem.alloc_bytes);
+  if (sysEl) sysEl.textContent = formatBytes(mem.sys_bytes);
+  if (goroutinesEl) goroutinesEl.textContent = String(mem.num_goroutine);
+}
+
+async function updatePrunePreview() {
+  const days = document.getElementById('prune-days-select')?.value || 14;
+  const countEl = document.getElementById('prune-preview-count');
+  if (countEl) countEl.textContent = 'Calculating...';
+
+  try {
+    const res = await fetch(`/api/v1/torrents/dead-count?days=${days}&max_seeders=0`);
+    if (res.ok) {
+      const data = await res.json();
+      if (countEl) countEl.textContent = `${data.count.toLocaleString()} dead torrent${data.count === 1 ? '' : 's'}`;
+    }
+  } catch (e) {
+    if (countEl) countEl.textContent = 'Error';
+  }
+}
+
+async function loadFeedsList() {
+  const container = document.getElementById('feeds-list-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/v1/feeds');
+    if (!res.ok) return;
+    const feeds = await res.json();
+
+    if (feeds.length === 0) {
+      container.innerHTML = `<div style="color: var(--text-dim); font-size: 0.85rem; padding: 12px; text-align: center;">No external feeds configured. Add one below!</div>`;
+      return;
+    }
+
+    container.innerHTML = feeds.map(f => {
+      const statusColor = f.enabled ? '#34d399' : '#94a3b8';
+      const statusText = f.enabled ? 'Enabled' : 'Disabled';
+      const syncInfo = f.last_sync && !f.last_sync.startsWith('0001') ? `Last: ${formatDate(f.last_sync)} (${f.last_count} added)` : 'Never synced';
+      const errBadge = f.last_error ? `<span style="color: #f87171; font-size: 0.75rem;" title="${escapeHtml(f.last_error)}">⚠️ Error</span>` : '';
+
+      return `
+        <div class="feed-item-card">
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(f.name)}</span>
+              <span class="badge" style="font-size: 0.7rem; color: ${statusColor}; border-color: ${statusColor};">${statusText}</span>
+              <span class="badge" style="font-size: 0.7rem; color: var(--accent-cyan);">${escapeHtml(f.type.toUpperCase())}</span>
+              ${errBadge}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;">
+              ${escapeHtml(f.url)} · ${syncInfo}
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="syncSingleFeed('${f.id}')" title="Sync this feed now">🔄</button>
+            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="toggleFeed('${f.id}', ${!f.enabled})" title="${f.enabled ? 'Disable' : 'Enable'} feed">${f.enabled ? '⏸️' : '▶️'}</button>
+            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" onclick="deleteFeed('${f.id}', '${escapeHtml(f.name)}')" title="Delete feed">🗑️</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = `<div style="color: #f87171; font-size: 0.85rem; padding: 10px;">Failed to load feeds: ${e.message}</div>`;
+  }
+}
+
+async function syncSingleFeed(id) {
+  try {
+    const res = await fetch(`/api/v1/feeds/sync?id=${encodeURIComponent(id)}`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      alert(`Sync finished! Added ${data.added} new torrents.`);
+      loadFeedsList();
+      performSearch(undefined, false);
+      loadStats();
+    } else {
+      alert('Sync failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+  }
+}
+
+async function toggleFeed(id, enabled) {
+  try {
+    const res = await fetch('/api/v1/feeds');
+    const feeds = await res.json();
+    const feed = feeds.find(f => f.id === id);
+    if (!feed) return;
+    feed.enabled = enabled;
+    await fetch('/api/v1/feeds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(feed)
+    });
+    loadFeedsList();
+  } catch (e) {
+    console.error('Toggle error:', e);
+  }
+}
+
+async function deleteFeed(id, name) {
+  if (!confirm(`Delete feed "${name}"?`)) return;
+  try {
+    await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    loadFeedsList();
+  } catch (e) {
+    console.error('Delete feed error:', e);
+  }
 }
 

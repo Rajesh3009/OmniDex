@@ -19,6 +19,7 @@ import (
 	"local-indexer/internal/db"
 	"local-indexer/internal/dhtcrawler"
 	"local-indexer/internal/feed"
+	"local-indexer/internal/ingester"
 	"local-indexer/internal/prowlarr"
 	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
@@ -30,13 +31,14 @@ const Version = "1.2.0"
 var staticFS embed.FS
 
 type Server struct {
-	cfg     config.Config
-	cfgPath string
-	store   *db.Store
-	crawler *dhtcrawler.Crawler
-	torznab *torznab.Server
-	prowl   *prowlarr.Client
-	feedGen *feed.Generator
+	cfg      config.Config
+	cfgPath  string
+	store    *db.Store
+	crawler  *dhtcrawler.Crawler
+	torznab  *torznab.Server
+	prowl    *prowlarr.Client
+	feedGen  *feed.Generator
+	ingester *ingester.Ingester
 }
 
 func main() {
@@ -55,9 +57,9 @@ func main() {
 
 	// Initialize passive DHT crawler
 	crawlerCfg := dhtcrawler.CrawlerConfig{
-		DHTListenAddr:   cfg.DHTListenAddr,
-		MaxTorrentPeers: cfg.MaxTorrentPeers,
-		Workers:         cfg.DHTWorkers,
+		DHTListenAddr:         cfg.DHTListenAddr,
+		MaxTorrentPeers:       cfg.MaxTorrentPeers,
+		Workers:               cfg.DHTWorkers,
 		MaxDownloadRate:       cfg.MaxDownloadRate,
 		MaxUploadRate:         cfg.MaxUploadRate,
 		MonthlyDataLimitBytes: cfg.MonthlyDataLimitBytes,
@@ -80,15 +82,46 @@ func main() {
 	// Initialize Dynamic Feed Generator
 	feedGen := feed.NewGenerator(store, baseURL)
 
+	// Initialize External Feed Ingester
+	feedIngester := ingester.NewIngester(store, cfg.ExternalFeeds)
+	feedIngester.Start()
+	defer feedIngester.Stop()
+
 	srv := &Server{
-		cfg:     cfg,
-		cfgPath: cfgPath,
-		store:   store,
-		crawler: crawler,
-		torznab: torznabServer,
-		prowl:   prowlClient,
-		feedGen: feedGen,
+		cfg:      cfg,
+		cfgPath:  cfgPath,
+		store:    store,
+		crawler:  crawler,
+		torznab:  torznabServer,
+		prowl:    prowlClient,
+		feedGen:  feedGen,
+		ingester: feedIngester,
 	}
+
+	// Periodic Memory Janitor (runs every 10 min: checkpoints WAL, shrinks cache, frees OS memory)
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			store.PruneMemory()
+			sysinfo.FreeMemory()
+		}
+	}()
+
+	// Periodic Auto-Pruning Janitor (runs every 6 hours if enabled)
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if srv.cfg.AutoPruneDead && srv.cfg.AutoPruneDays > 0 {
+				cutoff := time.Now().AddDate(0, 0, -srv.cfg.AutoPruneDays)
+				n, err := store.PruneTorrents(db.PruneOptions{MaxSeeders: 0, OlderThan: cutoff})
+				if err == nil && n > 0 {
+					log.Printf("[Auto-Prune] Removed %d dead torrents older than %d days", n, srv.cfg.AutoPruneDays)
+				}
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 
@@ -107,7 +140,14 @@ func main() {
 	mux.HandleFunc("/api", srv.torznab.HandleTorznab)
 
 	// Direct single-torrent API and download endpoints
-	mux.HandleFunc("/api/v1/torrent", srv.handleGetTorrent)
+	mux.HandleFunc("/api/v1/torrent", srv.handleTorrentRoute)
+	mux.HandleFunc("/api/v1/torrents/prune", srv.handlePruneTorrents)
+	mux.HandleFunc("/api/v1/torrents/dead-count", srv.handleDeadCount)
+	mux.HandleFunc("/api/v1/memory/shrink", srv.handleMemoryShrink)
+	mux.HandleFunc("/api/v1/feeds", srv.handleFeeds)
+	mux.HandleFunc("/api/v1/feeds/sync", srv.handleFeedsSync)
+	mux.HandleFunc("/api/v1/import", srv.handleImport)
+
 	mux.HandleFunc("/download/", srv.handleDownload)
 	mux.HandleFunc("/api/v1/download", srv.handleDownload)
 	mux.HandleFunc("/api/v1/download/", srv.handleDownload)
@@ -289,13 +329,15 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var update struct {
-			ProwlarrURL     string `json:"prowlarr_url"`
-			ProwlarrAPIKey  string `json:"prowlarr_api_key"`
-			TorznabAPIKey   string `json:"torznab_api_key"`
-			DHTWorkers      int    `json:"dht_workers"`
+			ProwlarrURL           string `json:"prowlarr_url"`
+			ProwlarrAPIKey        string `json:"prowlarr_api_key"`
+			TorznabAPIKey         string `json:"torznab_api_key"`
+			DHTWorkers            int    `json:"dht_workers"`
 			MaxDownloadRate       *int64 `json:"max_download_rate"`
 			MaxUploadRate         *int64 `json:"max_upload_rate"`
 			MonthlyDataLimitBytes *int64 `json:"monthly_data_limit_bytes"`
+			AutoPruneDead         *bool  `json:"auto_prune_dead"`
+			AutoPruneDays         *int   `json:"auto_prune_days"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -341,6 +383,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				s.crawler.SetMonthlyLimit(ml)
 			}
 		}
+		if update.AutoPruneDead != nil {
+			s.cfg.AutoPruneDead = *update.AutoPruneDead
+		}
+		if update.AutoPruneDays != nil && *update.AutoPruneDays > 0 {
+			s.cfg.AutoPruneDays = *update.AutoPruneDays
+		}
 
 		if s.crawler != nil && (update.MaxDownloadRate != nil || update.MaxUploadRate != nil) {
 			s.crawler.SetRateLimits(s.cfg.MaxDownloadRate, s.cfg.MaxUploadRate)
@@ -354,6 +402,214 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleTorrentRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+		if hash == "" {
+			hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
+		}
+		if hash == "" {
+			http.Error(w, "missing hash parameter", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DeleteTorrent(hash); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "deleted": hash})
+		return
+	}
+	s.handleGetTorrent(w, r)
+}
+
+func (s *Server) handlePruneTorrents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Days       int    `json:"days"`
+		MaxSeeders int    `json:"max_seeders"`
+		Source     string `json:"source"`
+		PruneSpam  bool   `json:"prune_spam"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var cutoff time.Time
+	if req.Days > 0 {
+		cutoff = time.Now().AddDate(0, 0, -req.Days)
+	}
+
+	opts := db.PruneOptions{
+		MaxSeeders: req.MaxSeeders,
+		OlderThan:  cutoff,
+		Source:     req.Source,
+		PruneSpam:  req.PruneSpam,
+	}
+
+	affected, err := s.store.PruneTorrents(opts)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"deleted": affected,
+	})
+}
+
+func (s *Server) handleDeadCount(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	maxSeeders, _ := strconv.Atoi(r.URL.Query().Get("max_seeders"))
+	var cutoff time.Time
+	if days > 0 {
+		cutoff = time.Now().AddDate(0, 0, -days)
+	}
+	count, err := s.store.CountDeadTorrents(maxSeeders, cutoff)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"count": count})
+}
+
+func (s *Server) handleMemoryShrink(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.store.PruneMemory()
+	sysinfo.FreeMemory()
+	mem := sysinfo.GetMemoryStats()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"memory": mem,
+	})
+}
+
+func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		statuses := s.ingester.GetStatuses()
+		_ = json.NewEncoder(w).Encode(statuses)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var f config.FeedConfig
+		if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if f.ID == "" {
+			f.ID = fmt.Sprintf("feed-%d", time.Now().UnixNano())
+		}
+		if f.Name == "" {
+			f.Name = "Custom Feed"
+		}
+		if f.IntervalMinutes <= 0 {
+			f.IntervalMinutes = 30
+		}
+
+		found := false
+		for i, existing := range s.cfg.ExternalFeeds {
+			if existing.ID == f.ID {
+				s.cfg.ExternalFeeds[i] = f
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.cfg.ExternalFeeds = append(s.cfg.ExternalFeeds, f)
+		}
+		_ = config.SaveConfig(s.cfgPath, s.cfg)
+		s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
+
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "feed": f})
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			http.Error(w, "missing id parameter", http.StatusBadRequest)
+			return
+		}
+		var updated []config.FeedConfig
+		for _, f := range s.cfg.ExternalFeeds {
+			if f.ID != id {
+				updated = append(updated, f)
+			}
+		}
+		s.cfg.ExternalFeeds = updated
+		_ = config.SaveConfig(s.cfgPath, s.cfg)
+		s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
+
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleFeedsSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	w.Header().Set("Content-Type", "application/json")
+	if id != "" {
+		added, err := s.ingester.SyncFeed(r.Context(), id)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error(), "added": added})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "added": added})
+		return
+	}
+
+	added, errs := s.ingester.SyncAll(r.Context())
+	var errStrs []string
+	for _, e := range errs {
+		errStrs = append(errStrs, e.Error())
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"added":  added,
+		"errors": errStrs,
+	})
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Input string `json:"input"`
+		Name  string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rec, err := s.ingester.ImportDirect(req.Input, req.Name)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "torrent": rec})
 }
 
 func (s *Server) handleGetTorrent(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,9 @@
         <button id="btn-show-torznab" class="nav-pill">
           📡 Torznab Endpoint
         </button>
+        <button id="btn-clean-dead" class="nav-pill" style="border-color: #ef4444; color: #fecaca; background: rgba(239, 68, 68, 0.15)" title="Clean Dead Torrents">
+          🧹 Clean Dead
+        </button>
         <button id="btn-show-settings" class="nav-pill">
           ⚙️ Settings
         </button>
@@ -56,7 +59,7 @@
         <span class="stat-sub" id="stat-dht-announces">0 KRPC announces</span>
       </div>
       <div class="stat-card" style="--card-color: var(--accent-purple)">
-        <span class="stat-label">Prowlarr Synced</span>
+        <span class="stat-label">Prowlarr / Feeds</span>
         <span class="stat-value" id="stat-prowlarr-count">0</span>
         <span class="stat-sub">Aggregated external</span>
       </div>
@@ -71,7 +74,10 @@
         <span class="stat-sub" id="stat-db-info">SQLite WAL + FTS5</span>
       </div>
       <div class="stat-card" style="--card-color: #ec4899">
-        <span class="stat-label">RAM Usage</span>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span class="stat-label">RAM Usage</span>
+          <button id="btn-quick-free-ram" class="btn-micro" title="Clean SQLite cache and free OS memory">🧹 Free</button>
+        </div>
         <span class="stat-value" id="stat-ram-usage">0 MB</span>
         <span class="stat-sub" id="stat-ram-sub">Min: 0 MB · Max: 0 MB</span>
       </div>
@@ -420,48 +426,201 @@
 
   <!-- Settings Modal -->
   <div class="modal-overlay" id="modal-settings">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 720px; width: 95%;">
       <div class="modal-header">
-        <h2>System Configuration</h2>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h2>⚙️ System Configuration</h2>
+          <span class="badge badge-dht">OmniDex Control Center</span>
+        </div>
         <button class="modal-close" data-close="modal-settings">&times;</button>
       </div>
 
+      <!-- Settings Nav Tabs -->
+      <div class="settings-tabs" style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 18px;">
+        <button type="button" class="tab-btn active" data-tab="tab-general">General & DHT</button>
+        <button type="button" class="tab-btn" data-tab="tab-feeds">External Feeds (RSS/Torznab)</button>
+        <button type="button" class="tab-btn" data-tab="tab-import">Direct Import</button>
+        <button type="button" class="tab-btn" data-tab="tab-maintenance">Memory & Cleanup</button>
+      </div>
+
       <form id="settings-form">
-        <div class="form-group">
-          <label for="cfg-prowlarr-url">Prowlarr Base URL</label>
-          <input type="text" id="cfg-prowlarr-url" class="form-input" placeholder="http://localhost:9696">
+        <!-- Tab 1: General & DHT -->
+        <div class="tab-panel active" id="tab-general">
+          <div class="form-group">
+            <label for="cfg-prowlarr-url">Prowlarr Base URL</label>
+            <input type="text" id="cfg-prowlarr-url" class="form-input" placeholder="http://localhost:9696">
+          </div>
+          <div class="form-group">
+            <label for="cfg-prowlarr-key">Prowlarr API Key</label>
+            <input type="password" id="cfg-prowlarr-key" class="form-input" placeholder="Paste Prowlarr API key">
+          </div>
+          <div class="form-group">
+            <label for="cfg-torznab-key">Torznab Inbound API Key</label>
+            <input type="text" id="cfg-torznab-key" class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
+            <input type="number" id="cfg-dht-workers" class="form-input" min="5" max="50">
+          </div>
+          <div class="form-group">
+            <label for="cfg-max-download-rate">Download Bandwidth Limit (KB/s)</label>
+            <input type="number" id="cfg-max-download-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 1024 KB/s">
+            <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed. Limit applies to DHT wire swarm traffic.</small>
+          </div>
+          <div class="form-group">
+            <label for="cfg-max-upload-rate">Upload Bandwidth Limit (KB/s)</label>
+            <input type="number" id="cfg-max-upload-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 512 KB/s">
+            <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed.</small>
+          </div>
+          <div class="form-group">
+            <label for="cfg-monthly-data-limit">Monthly Internet Data Limit (GB)</label>
+            <input type="number" id="cfg-monthly-data-limit" class="form-input" min="0" step="0.1" placeholder="0 (unlimited) or e.g. 50 GB">
+            <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Cap monthly network usage (download + upload).</small>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="cfg-prowlarr-key">Prowlarr API Key</label>
-          <input type="password" id="cfg-prowlarr-key" class="form-input" placeholder="Paste Prowlarr API key">
+
+        <!-- Tab 2: External Feeds -->
+        <div class="tab-panel" id="tab-feeds" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">
+              Ingest torrents automatically from Torznab indexers, RSS 2.0 / Atom feeds, or YTS API.
+            </p>
+            <button type="button" id="btn-sync-all-feeds" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;">🔄 Sync All Feeds Now</button>
+          </div>
+
+          <div id="feeds-list-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; max-height: 250px; overflow-y: auto;">
+            <!-- Dynamically populated feeds -->
+          </div>
+
+          <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px;">
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-cyan); display: block; margin-bottom: 8px;">➕ Add External Feed</span>
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-bottom: 8px;">
+              <input type="text" id="new-feed-name" class="form-input" placeholder="Feed Name (e.g. Nyaa Anime)">
+              <select id="new-feed-type" class="custom-select">
+                <option value="rss" selected>RSS 2.0 / Atom</option>
+                <option value="torznab">Torznab Indexer</option>
+                <option value="yts">YTS Movie API</option>
+              </select>
+            </div>
+            <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+              <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml">
+              <input type="password" id="new-feed-apikey" class="form-input" placeholder="API Key (optional)">
+              <input type="number" id="new-feed-interval" class="form-input" min="5" value="30" placeholder="Interval (min)">
+            </div>
+            <button type="button" id="btn-add-feed" class="btn btn-secondary" style="width: 100%; font-size: 0.85rem;">Add Feed</button>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="cfg-torznab-key">Torznab Inbound API Key</label>
-          <input type="text" id="cfg-torznab-key" class="form-input">
+
+        <!-- Tab 3: Direct Import -->
+        <div class="tab-panel" id="tab-import" style="display: none;">
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 14px;">
+            Quickly index any torrent by pasting a Magnet link or 40-character SHA1 infohash.
+          </p>
+          <div class="form-group">
+            <label for="import-input">Magnet URI or 40-char InfoHash</label>
+            <input type="text" id="import-input" class="form-input" placeholder="magnet:?xt=urn:btih:... or 40-char hex hash">
+          </div>
+          <div class="form-group">
+            <label for="import-name">Title / Description (optional)</label>
+            <input type="text" id="import-name" class="form-input" placeholder="Override title if magnet doesn't have dn parameter">
+          </div>
+          <div id="import-status-msg" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.85rem;"></div>
+          <button type="button" id="btn-execute-import" class="btn btn-primary" style="width: 100%;">🧲 Import & Index Torrent</button>
         </div>
-        <div class="form-group">
-          <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
-          <input type="number" id="cfg-dht-workers" class="form-input" min="5" max="50">
-        </div>
-        <div class="form-group">
-          <label for="cfg-max-download-rate">Download Bandwidth Limit (KB/s)</label>
-          <input type="number" id="cfg-max-download-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 1024 KB/s">
-          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed. Limit applies to DHT wire swarm traffic.</small>
-        </div>
-        <div class="form-group">
-          <label for="cfg-max-upload-rate">Upload Bandwidth Limit (KB/s)</label>
-          <input type="number" id="cfg-max-upload-rate" class="form-input" min="0" placeholder="0 (unlimited) or e.g. 512 KB/s">
-          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Set to 0 for unlimited speed.</small>
-        </div>
-        <div class="form-group">
-          <label for="cfg-monthly-data-limit">Monthly Internet Data Limit (GB)</label>
-          <input type="number" id="cfg-monthly-data-limit" class="form-input" min="0" step="0.1" placeholder="0 (unlimited) or e.g. 50 GB">
-          <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Cap monthly network usage (download + upload). When reached, crawling pauses until next calendar month or limit increase.</small>
+
+        <!-- Tab 4: Memory & Cleanup -->
+        <div class="tab-panel" id="tab-maintenance" style="display: none;">
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div>
+                <span style="font-weight: 600; color: #ec4899; display: block;">Memory Optimizer & Cache Janitor</span>
+                <span style="font-size: 0.8rem; color: var(--text-dim);">Release idle Go virtual heap memory and checkpoint SQLite WAL cache.</span>
+              </div>
+              <button type="button" id="btn-janitor-shrink" class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem;">🧹 Free Memory Now</button>
+            </div>
+            <div id="janitor-mem-breakdown" style="font-size: 0.8rem; color: var(--text-muted); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px;">
+              <span>Current Working Set: <strong id="janitor-rss">-</strong></span>
+              <span>Go Heap In-Use: <strong id="janitor-heap">-</strong></span>
+              <span>OS Reserved (Sys): <strong id="janitor-sys">-</strong></span>
+              <span>Active Goroutines: <strong id="janitor-goroutines">-</strong></span>
+            </div>
+          </div>
+
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px;">
+            <span style="font-weight: 600; color: #f87171; display: block; margin-bottom: 8px;">Automated Dead Torrent Purge</span>
+            <div class="form-group" style="margin-bottom: 8px;">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="cfg-auto-prune-dead">
+                <span>Automatically purge dead torrents every 6 hours</span>
+              </label>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="cfg-auto-prune-days">Prune torrents with 0 seeders older than (days)</label>
+              <input type="number" id="cfg-auto-prune-days" class="form-input" min="1" max="365" value="30">
+            </div>
+          </div>
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
           <button type="button" class="btn btn-secondary" data-close="modal-settings">Cancel</button>
           <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Clean Dead Torrents Modal -->
+  <div class="modal-overlay" id="modal-prune-dead">
+    <div class="modal-content" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h2>🧹 Clean Dead Torrents</h2>
+          <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);">Database Purge</span>
+        </div>
+        <button class="modal-close" data-close="modal-prune-dead">&times;</button>
+      </div>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">
+        Permanently remove dead or abandoned torrents (seeders ≤ 0) and free up database space and FTS5 search index.
+      </p>
+
+      <form id="prune-dead-form">
+        <div class="form-group">
+          <label for="prune-days-select">Dead Threshold</label>
+          <select id="prune-days-select" class="custom-select" style="width: 100%;">
+            <option value="14" selected>0 Seeders & older than 14 days (Recommended)</option>
+            <option value="7">0 Seeders & older than 7 days</option>
+            <option value="30">0 Seeders & older than 30 days</option>
+            <option value="60">0 Seeders & older than 60 days</option>
+            <option value="0">All Torrents with 0 Seeders (Aggressive)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="prune-source-select">Source Scope</label>
+          <select id="prune-source-select" class="custom-select" style="width: 100%;">
+            <option value="all" selected>All Sources (DHT, Prowlarr, Feeds)</option>
+            <option value="dht">DHT Crawled Torrents Only</option>
+            <option value="prowlarr">Prowlarr Only</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="prune-include-spam">
+            <span>Also purge flagged suspicious / spam torrents</span>
+          </label>
+        </div>
+
+        <div id="prune-preview-box" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center;">
+          <span>Torrents matching criteria:</span>
+          <span id="prune-preview-count" style="font-weight: 700; color: #f87171;">Calculating...</span>
+        </div>
+
+        <div id="prune-status-msg" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem;"></div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button type="button" class="btn btn-secondary" data-close="modal-prune-dead">Cancel</button>
+          <button type="submit" id="btn-execute-prune" class="btn" style="background: #dc2626; color: #fff;">🗑️ Purge Matching Torrents</button>
         </div>
       </form>
     </div>
@@ -549,6 +708,7 @@
       </div>
 
       <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;">
+        <button id="btn-delete-torrent" class="btn" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #fca5a5;">🗑️ Delete</button>
         <button id="btn-copy-magnet" class="btn btn-secondary">Copy Magnet 🔗</button>
         <a id="detail-magnet-link" href="#" class="btn btn-primary">Open Magnet 🧲</a>
         <button class="btn btn-secondary" data-close="modal-details">Close</button>
@@ -556,6 +716,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=13"></script>
+  <script src="/static/js/app.js?v=16"></script>
 </body>
 </html>
