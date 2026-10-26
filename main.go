@@ -154,6 +154,7 @@ func main() {
 	mux.HandleFunc("/api/v1/torrents/filter-purge", srv.handleFilterPurge)
 	mux.HandleFunc("/api/v1/memory/shrink", srv.handleMemoryShrink)
 	mux.HandleFunc("/api/v1/feeds", srv.handleFeeds)
+	mux.HandleFunc("/api/v1/feeds/delete", srv.handleFeedsDelete)
 	mux.HandleFunc("/api/v1/feeds/sync", srv.handleFeedsSync)
 	mux.HandleFunc("/api/v1/import", srv.handleImport)
 
@@ -608,11 +609,60 @@ func (s *Server) handleMemoryShrink(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) deleteFeedByID(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	found := false
+	var updated []config.FeedConfig
+	for _, f := range s.cfg.ExternalFeeds {
+		if f.ID == id {
+			found = true
+		} else {
+			updated = append(updated, f)
+		}
+	}
+	s.cfg.ExternalFeeds = updated
+	_ = config.SaveConfig(s.cfgPath, s.cfg)
+	s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
+	return found
+}
+
+func (s *Server) handleFeedsDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" && r.Body != nil {
+		var req struct {
+			ID string `json:"id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		id = strings.TrimSpace(req.ID)
+	}
+	if id == "" {
+		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	s.deleteFeedByID(id)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "deleted": id})
+}
+
 func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
 		statuses := s.ingester.GetStatuses()
 		_ = json.NewEncoder(w).Encode(statuses)
+		return
+	}
+
+	if r.Method == http.MethodDelete || (r.Method == http.MethodPost && r.URL.Query().Get("action") == "delete") {
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			http.Error(w, "missing id parameter", http.StatusBadRequest)
+			return
+		}
+		s.deleteFeedByID(id)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
 
@@ -647,26 +697,6 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 		s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
 
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "feed": f})
-		return
-	}
-
-	if r.Method == http.MethodDelete {
-		id := strings.TrimSpace(r.URL.Query().Get("id"))
-		if id == "" {
-			http.Error(w, "missing id parameter", http.StatusBadRequest)
-			return
-		}
-		var updated []config.FeedConfig
-		for _, f := range s.cfg.ExternalFeeds {
-			if f.ID != id {
-				updated = append(updated, f)
-			}
-		}
-		s.cfg.ExternalFeeds = updated
-		_ = config.SaveConfig(s.cfgPath, s.cfg)
-		s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
-
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
 

@@ -2195,7 +2195,7 @@ async function loadFeedsList() {
           <div style="display: flex; gap: 6px; align-items: center;">
             <button type="button" class="btn btn-secondary btn-feed-sync" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" title="Sync this feed now">🔄</button>
             <button type="button" class="btn btn-secondary btn-feed-toggle" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" data-enabled="${!f.enabled}" title="${f.enabled ? 'Disable' : 'Enable'} feed">${f.enabled ? '⏸️' : '▶️'}</button>
-            <button type="button" class="btn btn-secondary btn-feed-delete" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" title="Delete feed">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-feed-delete" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" onclick="deleteFeed(this.dataset.id, this.dataset.name, this)" title="Delete feed">🗑️</button>
           </div>
         </div>
       `;
@@ -2208,7 +2208,10 @@ async function loadFeedsList() {
       b.onclick = () => toggleFeed(b.dataset.id, b.dataset.enabled === 'true');
     });
     container.querySelectorAll('.btn-feed-delete').forEach(b => {
-      b.onclick = () => deleteFeed(b.dataset.id, b.dataset.name);
+      b.onclick = (e) => {
+        e.stopPropagation();
+        deleteFeed(b.dataset.id, b.dataset.name, b);
+      };
     });
   } catch (e) {
     container.innerHTML = `<div style="color: #f87171; font-size: 0.85rem; padding: 10px;">Failed to load feeds: ${e.message}</div>`;
@@ -2251,19 +2254,34 @@ async function toggleFeed(id, enabled) {
   }
 }
 
-async function deleteFeed(id, name) {
-  if (!confirm(`Delete feed "${name}"?`)) return;
+async function deleteFeed(id, name, btn) {
+  if (!confirm(`Delete external feed "${name || id}"?`)) {
+    return;
+  }
+
+  const row = btn ? btn.closest('.feed-item-card') : null;
+  if (row) {
+    row.style.opacity = '0.35';
+    row.style.pointerEvents = 'none';
+  }
+
   try {
-    const res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (res.ok) {
-      showToast(`Feed "${name}" deleted successfully`, 'success');
-    } else {
-      showToast('Failed to delete feed', 'error');
+    let res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      res = await fetch(`/api/v1/feeds/delete?id=${encodeURIComponent(id)}`, { method: 'POST' });
     }
-    loadFeedsList();
+    const data = await res.json().catch(() => ({}));
+    if (res.ok || data.status === 'ok') {
+      showToast(`Feed "${name || id}" deleted successfully`, 'success');
+      if (row) row.remove();
+    } else {
+      showToast('Failed to delete feed: ' + (data.error || 'Server error'), 'error');
+    }
+    await loadFeedsList();
   } catch (e) {
     console.error('Delete feed error:', e);
     showToast('Delete error: ' + e.message, 'error');
+    await loadFeedsList();
   }
 }
 
