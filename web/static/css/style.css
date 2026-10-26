@@ -1770,6 +1770,7 @@ body {
   -webkit-text-security: disc;
   font-family: monospace;
   letter-spacing: 1px;
+  padding-right: 38px !important;
 }
 
 .masked-api-key.unmasked {

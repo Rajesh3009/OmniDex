@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=17">
+  <link rel="stylesheet" href="/static/css/style.css?v=18">
 </head>
 <body>
   <div class="container">
@@ -410,7 +410,10 @@
 
       <div class="form-group">
         <label>API Key</label>
-        <div class="code-box" id="torznab-key-display">local-indexer-secret-key</div>
+        <div style="position: relative; display: flex; align-items: center;">
+          <div class="code-box masked-api-key" id="torznab-key-display" style="width: 100%; margin-bottom: 0;">local-indexer-secret-key</div>
+          <button type="button" class="btn-toggle-mask" data-target="torznab-key-display" title="Toggle visibility">👁️</button>
+        </div>
       </div>
 
       <div class="form-group">
@@ -459,7 +462,10 @@
           </div>
           <div class="form-group">
             <label for="cfg-torznab-key">Torznab Inbound API Key</label>
-            <input type="text" id="cfg-torznab-key" class="form-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true">
+            <div style="position: relative; display: flex; align-items: center;">
+              <input type="text" id="cfg-torznab-key" class="form-input masked-api-key" placeholder="Enter Torznab API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
+              <button type="button" class="btn-toggle-mask" data-target="cfg-torznab-key" title="Toggle visibility">👁️</button>
+            </div>
           </div>
           <div class="form-group">
             <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
@@ -722,6 +728,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=17"></script>
+  <script src="/static/js/app.js?v=18"></script>
 </body>
 </html>
