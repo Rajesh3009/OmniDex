@@ -253,6 +253,26 @@ function initEventListeners() {
     loadFeedsList();
   });
 
+  // Toggle API key visibility without browser password prompts
+  document.querySelectorAll('.btn-toggle-mask').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = btn.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      const isMasked = !input.classList.contains('unmasked');
+      if (isMasked) {
+        input.classList.add('unmasked');
+        btn.textContent = '🙈';
+        btn.title = 'Hide value';
+      } else {
+        input.classList.remove('unmasked');
+        btn.textContent = '👁️';
+        btn.title = 'Show value';
+      }
+    });
+  });
+
   // Settings Tabs
   document.querySelectorAll('.settings-tabs .tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {

@@ -1766,4 +1766,33 @@ body {
   border-color: rgba(239, 68, 68, 0.4) !important;
 }
 
+.masked-api-key {
+  -webkit-text-security: disc;
+  font-family: monospace;
+  letter-spacing: 1px;
+}
+
+.masked-api-key.unmasked {
+  -webkit-text-security: none;
+  letter-spacing: normal;
+}
+
+.btn-toggle-mask {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+}
+
+.btn-toggle-mask:hover {
+  color: var(--accent-cyan);
+}
+
 

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=14">
+  <link rel="stylesheet" href="/static/css/style.css?v=17">
 </head>
 <body>
   <div class="container">
@@ -443,20 +443,23 @@
         <button type="button" class="tab-btn" data-tab="tab-maintenance">Memory & Cleanup</button>
       </div>
 
-      <form id="settings-form">
+      <form id="settings-form" autocomplete="off" onsubmit="return false;">
         <!-- Tab 1: General & DHT -->
         <div class="tab-panel active" id="tab-general">
           <div class="form-group">
             <label for="cfg-prowlarr-url">Prowlarr Base URL</label>
-            <input type="text" id="cfg-prowlarr-url" class="form-input" placeholder="http://localhost:9696">
+            <input type="text" id="cfg-prowlarr-url" class="form-input" placeholder="http://localhost:9696" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true">
           </div>
           <div class="form-group">
             <label for="cfg-prowlarr-key">Prowlarr API Key</label>
-            <input type="password" id="cfg-prowlarr-key" class="form-input" placeholder="Paste Prowlarr API key">
+            <div style="position: relative; display: flex; align-items: center;">
+              <input type="text" id="cfg-prowlarr-key" class="form-input masked-api-key" placeholder="Paste Prowlarr API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
+              <button type="button" class="btn-toggle-mask" data-target="cfg-prowlarr-key" title="Toggle visibility">👁️</button>
+            </div>
           </div>
           <div class="form-group">
             <label for="cfg-torznab-key">Torznab Inbound API Key</label>
-            <input type="text" id="cfg-torznab-key" class="form-input">
+            <input type="text" id="cfg-torznab-key" class="form-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true">
           </div>
           <div class="form-group">
             <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
@@ -503,8 +506,11 @@
               </select>
             </div>
             <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-              <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml">
-              <input type="password" id="new-feed-apikey" class="form-input" placeholder="API Key (optional)">
+              <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml" autocomplete="off" data-lpignore="true">
+              <div style="position: relative; display: flex; align-items: center;">
+                <input type="text" id="new-feed-apikey" class="form-input masked-api-key" placeholder="API Key (optional)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
+                <button type="button" class="btn-toggle-mask" data-target="new-feed-apikey" title="Toggle visibility">👁️</button>
+              </div>
               <input type="number" id="new-feed-interval" class="form-input" min="5" value="30" placeholder="Interval (min)">
             </div>
             <button type="button" id="btn-add-feed" class="btn btn-secondary" style="width: 100%; font-size: 0.85rem;">Add Feed</button>
@@ -716,6 +722,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=16"></script>
+  <script src="/static/js/app.js?v=17"></script>
 </body>
 </html>
