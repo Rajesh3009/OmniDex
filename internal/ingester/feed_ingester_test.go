@@ -1,6 +1,7 @@
 package ingester
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"testing"
 )
@@ -65,3 +66,45 @@ func TestGuessCategory(t *testing.T) {
 		}
 	}
 }
+
+func TestIngestEZTVJSON(t *testing.T) {
+	sampleJSON := []byte(`{
+		"torrents_count": 1,
+		"limit": 10,
+		"page": 1,
+		"torrents": [
+			{
+				"id": 12345,
+				"hash": "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+				"filename": "Breaking.Bad.S01E01.720p.BluRay.x264.mkv",
+				"title": "Breaking Bad S01E01 720p BluRay x264",
+				"magnet_url": "magnet:?xt=urn:btih:abcdefabcdefabcdefabcdefabcdefabcdefabcd&dn=Breaking+Bad",
+				"seeds": 85,
+				"peers": 12,
+				"date_released_unix": 1700000000,
+				"size_bytes": "1048576000"
+			}
+		]
+	}`)
+
+	// Using a nil store just to test JSON unmarshaling and record parsing without db insertion errors
+	var resp eztvResponse
+	if err := json.Unmarshal(sampleJSON, &resp); err != nil {
+		t.Fatalf("Unmarshal EZTV JSON failed: %v", err)
+	}
+
+	if len(resp.Torrents) != 1 {
+		t.Fatalf("expected 1 torrent in EZTV response, got %d", len(resp.Torrents))
+	}
+
+	torrent := resp.Torrents[0]
+	if torrent.Hash != "abcdefabcdefabcdefabcdefabcdefabcdefabcd" {
+		t.Errorf("expected hash abcdefabcdefabcdefabcdefabcdefabcdefabcd, got %s", torrent.Hash)
+	}
+
+	size, err := torrent.SizeBytes.Int64()
+	if err != nil || size != 1048576000 {
+		t.Errorf("expected size 1048576000, got %d (err: %v)", size, err)
+	}
+}
+

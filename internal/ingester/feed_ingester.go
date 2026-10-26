@@ -83,7 +83,9 @@ func (ing *Ingester) UpdateFeeds(feeds []config.FeedConfig) {
 	defer ing.statusMu.Unlock()
 
 	ing.feeds = feeds
+	activeIDs := make(map[string]bool, len(feeds))
 	for _, f := range feeds {
+		activeIDs[f.ID] = true
 		if st, ok := ing.statusMap[f.ID]; ok {
 			st.Name = f.Name
 			st.Type = f.Type
@@ -97,6 +99,13 @@ func (ing *Ingester) UpdateFeeds(feeds []config.FeedConfig) {
 				URL:     f.URL,
 				Enabled: f.Enabled,
 			}
+		}
+	}
+
+	// Purge feeds that were deleted
+	for id := range ing.statusMap {
+		if !activeIDs[id] {
+			delete(ing.statusMap, id)
 		}
 	}
 }
@@ -271,18 +280,31 @@ func (ing *Ingester) fetchAndIngest(ctx context.Context, f config.FeedConfig) (i
 		return 0, err
 	}
 
-	// Route parser based on type or content detection
-	switch strings.ToLower(f.Type) {
-	case "yts":
-		return ing.ingestYTSJSON(bodyBytes, f.Name)
-	default:
-		// Try RSS/Torznab XML first, then fallback to JSON if XML fails
-		added, err := ing.ingestXMLFeed(bodyBytes, f.Name)
-		if err == nil {
-			return added, nil
-		}
+	// Route parser based on explicit type or content auto-detection
+	fType := strings.ToLower(f.Type)
+	trimmed := strings.TrimSpace(string(bodyBytes))
+	isJSON := strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+
+	if fType == "eztv" || (isJSON && strings.Contains(trimmed, `"torrents"`)) {
+		return ing.ingestEZTVJSON(bodyBytes, f.Name)
+	}
+	if fType == "yts" || (isJSON && strings.Contains(trimmed, `"movies"`)) {
 		return ing.ingestYTSJSON(bodyBytes, f.Name)
 	}
+
+	if isJSON {
+		// Attempt EZTV then YTS fallback
+		if added, err := ing.ingestEZTVJSON(bodyBytes, f.Name); err == nil {
+			return added, nil
+		}
+		if added, err := ing.ingestYTSJSON(bodyBytes, f.Name); err == nil {
+			return added, nil
+		}
+		return 0, fmt.Errorf("unrecognized JSON API response format from %s", f.URL)
+	}
+
+	// Try RSS / Torznab XML
+	return ing.ingestXMLFeed(bodyBytes, f.Name)
 }
 
 // XML Structs for Torznab & RSS 2.0
@@ -544,6 +566,119 @@ func (ing *Ingester) ingestYTSJSON(data []byte, sourceName string) (int, error) 
 			}
 			_ = ing.store.UpsertTorrent(rec)
 		}
+	}
+
+	return added, nil
+}
+
+// EZTV JSON API Models
+type eztvResponse struct {
+	TorrentsCount int `json:"torrents_count"`
+	Limit         int `json:"limit"`
+	Page          int `json:"page"`
+	Torrents      []struct {
+		ID               int         `json:"id"`
+		Hash             string      `json:"hash"`
+		Filename         string      `json:"filename"`
+		Title            string      `json:"title"`
+		MagnetURL        string      `json:"magnet_url"`
+		Seeds            int         `json:"seeds"`
+		Peers            int         `json:"peers"`
+		DateReleasedUnix int64       `json:"date_released_unix"`
+		SizeBytes        json.Number `json:"size_bytes"`
+	} `json:"torrents"`
+}
+
+func (ing *Ingester) ingestEZTVJSON(data []byte, sourceName string) (int, error) {
+	var resp eztvResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return 0, err
+	}
+
+	if len(resp.Torrents) == 0 {
+		return 0, nil
+	}
+
+	added := 0
+	for _, t := range resp.Torrents {
+		hash := strings.ToLower(strings.TrimSpace(t.Hash))
+		if hash == "" && t.MagnetURL != "" && strings.Contains(t.MagnetURL, "btih:") {
+			parts := strings.Split(t.MagnetURL, "btih:")
+			if len(parts) > 1 {
+				hash = strings.ToLower(strings.Split(parts[1], "&")[0])
+			}
+		}
+		if hash == "" {
+			continue
+		}
+
+		title := strings.TrimSpace(t.Title)
+		if title == "" {
+			title = strings.TrimSpace(t.Filename)
+		}
+		if title == "" {
+			title = "EZTV Torrent " + hash[:8]
+		}
+
+		magnet := t.MagnetURL
+		if magnet == "" {
+			magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hash, url.QueryEscape(title))
+		}
+
+		var size int64
+		if sz, err := t.SizeBytes.Int64(); err == nil && sz > 0 {
+			size = sz
+		}
+
+		tags := metadata.ExtractTags(title, nil)
+		spamVerdict := spamfilter.Inspect(title, nil, "Video", size)
+		filesJSON, _ := json.Marshal([]string{title})
+
+		created := time.Now().UTC()
+		if t.DateReleasedUnix > 0 {
+			created = time.Unix(t.DateReleasedUnix, 0).UTC()
+		}
+
+		source := "eztv"
+		if sourceName != "" {
+			source = strings.ToLower(strings.ReplaceAll(sourceName, " ", "-"))
+		}
+
+		rec := &db.TorrentRecord{
+			InfoHash:     hash,
+			Name:         title,
+			Size:         size,
+			FileCount:    1,
+			FilesJSON:    string(filesJSON),
+			CreatedTime:  created,
+			LastSeen:     time.Now().UTC(),
+			Source:       source,
+			Seeders:      t.Seeds,
+			Leechers:     t.Peers,
+			Category:     "Video",
+			MagnetURI:    magnet,
+			Resolution:   tags.Resolution,
+			Codec:        tags.Codec,
+			Quality:      tags.Quality,
+			HDR:          tags.HDR,
+			ReleaseGroup: tags.ReleaseGroup,
+			IsSuspicious: spamVerdict.IsSuspicious,
+			SpamScore:    spamVerdict.Score,
+			SpamReasons:  strings.Join(spamVerdict.Reasons, " • "),
+		}
+
+		ing.filterMu.RLock()
+		filter := ing.filterFunc
+		ing.filterMu.RUnlock()
+		if filter != nil && !filter(rec.Category, rec.Name) {
+			continue
+		}
+
+		exists, _ := ing.store.Exists(hash)
+		if !exists {
+			added++
+		}
+		_ = ing.store.UpsertTorrent(rec)
 	}
 
 	return added, nil

@@ -561,12 +561,13 @@
                 <input type="text" id="new-feed-name" class="form-input" placeholder="Feed Name (e.g. Nyaa Anime)">
                 <select id="new-feed-type" class="custom-select">
                   <option value="rss" selected>RSS 2.0 / Atom</option>
-                  <option value="torznab">Torznab Indexer</option>
+                  <option value="eztv">EZTV API (JSON)</option>
                   <option value="yts">YTS Movie API</option>
+                  <option value="torznab">Torznab Indexer</option>
                 </select>
               </div>
               <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml"
+                <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml or https://eztvx.to/api/get-torrents"
                   autocomplete="off" data-lpignore="true">
                 <div style="position: relative; display: flex; align-items: center;">
                   <input type="text" id="new-feed-apikey" class="form-input masked-api-key"
@@ -904,7 +905,7 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js?v=21"></script>
+    <script src="/static/js/app.js?v=22"></script>
 </body>
 
 </html>

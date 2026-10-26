@@ -2193,13 +2193,23 @@ async function loadFeedsList() {
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center;">
-            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="syncSingleFeed('${f.id}')" title="Sync this feed now">🔄</button>
-            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="toggleFeed('${f.id}', ${!f.enabled})" title="${f.enabled ? 'Disable' : 'Enable'} feed">${f.enabled ? '⏸️' : '▶️'}</button>
-            <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" onclick="deleteFeed('${f.id}', '${escapeHtml(f.name)}')" title="Delete feed">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-feed-sync" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" title="Sync this feed now">🔄</button>
+            <button type="button" class="btn btn-secondary btn-feed-toggle" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" data-enabled="${!f.enabled}" title="${f.enabled ? 'Disable' : 'Enable'} feed">${f.enabled ? '⏸️' : '▶️'}</button>
+            <button type="button" class="btn btn-secondary btn-feed-delete" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" title="Delete feed">🗑️</button>
           </div>
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll('.btn-feed-sync').forEach(b => {
+      b.onclick = () => syncSingleFeed(b.dataset.id);
+    });
+    container.querySelectorAll('.btn-feed-toggle').forEach(b => {
+      b.onclick = () => toggleFeed(b.dataset.id, b.dataset.enabled === 'true');
+    });
+    container.querySelectorAll('.btn-feed-delete').forEach(b => {
+      b.onclick = () => deleteFeed(b.dataset.id, b.dataset.name);
+    });
   } catch (e) {
     container.innerHTML = `<div style="color: #f87171; font-size: 0.85rem; padding: 10px;">Failed to load feeds: ${e.message}</div>`;
   }
@@ -2210,15 +2220,15 @@ async function syncSingleFeed(id) {
     const res = await fetch(`/api/v1/feeds/sync?id=${encodeURIComponent(id)}`, { method: 'POST' });
     const data = await res.json();
     if (res.ok) {
-      alert(`Sync finished! Added ${data.added} new torrents.`);
+      showToast(`Sync finished! Added ${data.added} new torrents.`, 'success');
       loadFeedsList();
       performSearch(undefined, false);
       loadStats();
     } else {
-      alert('Sync failed: ' + (data.error || 'Unknown error'));
+      showToast('Sync failed: ' + (data.error || 'Unknown error'), 'error');
     }
   } catch (e) {
-    alert('Sync error: ' + e.message);
+    showToast('Sync error: ' + e.message, 'error');
   }
 }
 
@@ -2234,6 +2244,7 @@ async function toggleFeed(id, enabled) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(feed)
     });
+    showToast(enabled ? 'Feed enabled' : 'Feed paused', 'info');
     loadFeedsList();
   } catch (e) {
     console.error('Toggle error:', e);
@@ -2243,10 +2254,21 @@ async function toggleFeed(id, enabled) {
 async function deleteFeed(id, name) {
   if (!confirm(`Delete feed "${name}"?`)) return;
   try {
-    await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast(`Feed "${name}" deleted successfully`, 'success');
+    } else {
+      showToast('Failed to delete feed', 'error');
+    }
     loadFeedsList();
   } catch (e) {
     console.error('Delete feed error:', e);
+    showToast('Delete error: ' + e.message, 'error');
   }
 }
+
+window.syncSingleFeed = syncSingleFeed;
+window.toggleFeed = toggleFeed;
+window.deleteFeed = deleteFeed;
+window.loadFeedsList = loadFeedsList;
 
