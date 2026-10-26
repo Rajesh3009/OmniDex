@@ -42,6 +42,14 @@ type Ingester struct {
 	statusMap  map[string]*FeedStatus
 	ctx        context.Context
 	cancel     context.CancelFunc
+	filterMu   sync.RWMutex
+	filterFunc func(category, name string) bool
+}
+
+func (ing *Ingester) SetFilterFunc(fn func(category, name string) bool) {
+	ing.filterMu.Lock()
+	defer ing.filterMu.Unlock()
+	ing.filterFunc = fn
 }
 
 func NewIngester(store *db.Store, initialFeeds []config.FeedConfig) *Ingester {
@@ -324,6 +332,13 @@ func (ing *Ingester) ingestXMLFeed(data []byte, sourceName string) (int, error) 
 			continue
 		}
 
+		ing.filterMu.RLock()
+		filter := ing.filterFunc
+		ing.filterMu.RUnlock()
+		if filter != nil && !filter(rec.Category, rec.Name) {
+			continue
+		}
+
 		exists, _ := ing.store.Exists(rec.InfoHash)
 		if !exists {
 			added++
@@ -516,6 +531,13 @@ func (ing *Ingester) ingestYTSJSON(data []byte, sourceName string) (int, error) 
 				ReleaseGroup: "YTS",
 			}
 
+			ing.filterMu.RLock()
+			filter := ing.filterFunc
+			ing.filterMu.RUnlock()
+			if filter != nil && !filter(rec.Category, rec.Name) {
+				continue
+			}
+
 			exists, _ := ing.store.Exists(hash)
 			if !exists {
 				added++
@@ -573,6 +595,14 @@ func (ing *Ingester) ImportDirect(rawInput string, customName string) (*db.Torre
 	}
 
 	category := guessCategory(name, "")
+
+	ing.filterMu.RLock()
+	filter := ing.filterFunc
+	ing.filterMu.RUnlock()
+	if filter != nil && !filter(category, name) {
+		return nil, fmt.Errorf("torrent does not match retention filter rules")
+	}
+
 	tags := metadata.ExtractTags(name, nil)
 	filesJSON, _ := json.Marshal([]string{name})
 

@@ -98,6 +98,13 @@ func main() {
 		ingester: feedIngester,
 	}
 
+	if crawler != nil {
+		crawler.SetFilterFunc(srv.cfg.MatchesRetentionFilter)
+	}
+	if feedIngester != nil {
+		feedIngester.SetFilterFunc(srv.cfg.MatchesRetentionFilter)
+	}
+
 	// Periodic Memory Janitor (runs every 10 min: checkpoints WAL, shrinks cache, frees OS memory)
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
@@ -143,6 +150,8 @@ func main() {
 	mux.HandleFunc("/api/v1/torrent", srv.handleTorrentRoute)
 	mux.HandleFunc("/api/v1/torrents/prune", srv.handlePruneTorrents)
 	mux.HandleFunc("/api/v1/torrents/dead-count", srv.handleDeadCount)
+	mux.HandleFunc("/api/v1/torrents/filter-preview", srv.handleFilterPreview)
+	mux.HandleFunc("/api/v1/torrents/filter-purge", srv.handleFilterPurge)
 	mux.HandleFunc("/api/v1/memory/shrink", srv.handleMemoryShrink)
 	mux.HandleFunc("/api/v1/feeds", srv.handleFeeds)
 	mux.HandleFunc("/api/v1/feeds/sync", srv.handleFeedsSync)
@@ -336,8 +345,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			MaxDownloadRate       *int64 `json:"max_download_rate"`
 			MaxUploadRate         *int64 `json:"max_upload_rate"`
 			MonthlyDataLimitBytes *int64 `json:"monthly_data_limit_bytes"`
-			AutoPruneDead         *bool  `json:"auto_prune_dead"`
-			AutoPruneDays         *int   `json:"auto_prune_days"`
+			AutoPruneDead         *bool    `json:"auto_prune_dead"`
+			AutoPruneDays         *int     `json:"auto_prune_days"`
+			FilterEnabled         *bool    `json:"filter_enabled"`
+			FilterCategoryMode    string   `json:"filter_category_mode"`
+			FilterCategories      []string `json:"filter_categories"`
+			FilterKeywords        []string `json:"filter_keywords"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -388,6 +401,26 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.AutoPruneDays != nil && *update.AutoPruneDays > 0 {
 			s.cfg.AutoPruneDays = *update.AutoPruneDays
+		}
+
+		if update.FilterEnabled != nil {
+			s.cfg.FilterEnabled = *update.FilterEnabled
+		}
+		if update.FilterCategoryMode != "" {
+			s.cfg.FilterCategoryMode = update.FilterCategoryMode
+		}
+		if update.FilterCategories != nil {
+			s.cfg.FilterCategories = update.FilterCategories
+		}
+		if update.FilterKeywords != nil {
+			s.cfg.FilterKeywords = update.FilterKeywords
+		}
+
+		if s.crawler != nil {
+			s.crawler.SetFilterFunc(s.cfg.MatchesRetentionFilter)
+		}
+		if s.ingester != nil {
+			s.ingester.SetFilterFunc(s.cfg.MatchesRetentionFilter)
 		}
 
 		if s.crawler != nil && (update.MaxDownloadRate != nil || update.MaxUploadRate != nil) {
@@ -477,6 +510,87 @@ func (s *Server) handleDeadCount(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"count": count})
+}
+
+func (s *Server) handleFilterPreview(w http.ResponseWriter, r *http.Request) {
+	rules := db.FilterRules{
+		Enabled:      s.cfg.FilterEnabled,
+		CategoryMode: s.cfg.FilterCategoryMode,
+		Categories:   s.cfg.FilterCategories,
+		Keywords:     s.cfg.FilterKeywords,
+	}
+
+	if r.URL.Query().Get("enabled") != "" {
+		rules.Enabled = r.URL.Query().Get("enabled") == "true"
+	}
+	if mode := r.URL.Query().Get("category_mode"); mode != "" {
+		rules.CategoryMode = mode
+	}
+	if cats := r.URL.Query().Get("categories"); cats != "" {
+		rules.Categories = strings.Split(cats, ",")
+	}
+	if kws := r.URL.Query().Get("keywords"); kws != "" {
+		rules.Keywords = strings.Split(kws, ",")
+	}
+
+	count, err := s.store.CountFilterViolations(rules)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"violations": count,
+		"rules":      rules,
+	})
+}
+
+func (s *Server) handleFilterPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rules := db.FilterRules{
+		Enabled:      s.cfg.FilterEnabled,
+		CategoryMode: s.cfg.FilterCategoryMode,
+		Categories:   s.cfg.FilterCategories,
+		Keywords:     s.cfg.FilterKeywords,
+	}
+
+	var req struct {
+		Enabled      *bool    `json:"filter_enabled"`
+		CategoryMode string   `json:"filter_category_mode"`
+		Categories   []string `json:"filter_categories"`
+		Keywords     []string `json:"filter_keywords"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+		if req.Enabled != nil {
+			rules.Enabled = *req.Enabled
+		}
+		if req.CategoryMode != "" {
+			rules.CategoryMode = req.CategoryMode
+		}
+		if req.Categories != nil {
+			rules.Categories = req.Categories
+		}
+		if req.Keywords != nil {
+			rules.Keywords = req.Keywords
+		}
+	}
+
+	deleted, err := s.store.PruneFilterViolations(rules)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"deleted": deleted,
+	})
 }
 
 func (s *Server) handleMemoryShrink(w http.ResponseWriter, r *http.Request) {
@@ -821,6 +935,9 @@ func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
 		rec := item.ToRecord()
 		if rec.InfoHash == "" || rec.Name == "" {
 			// Skip truly empty/unusable records (no guid, no download URL, no title)
+			continue
+		}
+		if !s.cfg.MatchesRetentionFilter(rec.Category, rec.Name) {
 			continue
 		}
 		exists, _ := s.store.Exists(rec.InfoHash)

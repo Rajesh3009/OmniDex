@@ -331,8 +331,31 @@ function initEventListeners() {
       if (panel) panel.style.display = 'block';
       if (targetId === 'tab-feeds') {
         loadFeedsList();
+      } else if (targetId === 'tab-filter') {
+        updateFilterPreview();
       }
     });
+  });
+
+  // Retention & Rules Listeners
+  ['cfg-filter-enabled', 'cfg-filter-category-mode'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateFilterPreview);
+  });
+  document.querySelectorAll('.filter-cat-check').forEach(cb => {
+    cb.addEventListener('change', updateFilterPreview);
+  });
+  let filterKwTimer = null;
+  document.getElementById('cfg-filter-keywords')?.addEventListener('input', () => {
+    clearTimeout(filterKwTimer);
+    filterKwTimer = setTimeout(updateFilterPreview, 350);
+  });
+  document.getElementById('btn-preview-filter-purge')?.addEventListener('click', updateFilterPreview);
+  document.getElementById('btn-execute-filter-purge')?.addEventListener('click', handleExecuteFilterPurge);
+  document.getElementById('btn-open-filter-rules')?.addEventListener('click', () => {
+    closeModal('modal-prune-dead');
+    openModal('modal-settings');
+    const tabBtn = document.querySelector('[data-tab="tab-filter"]');
+    if (tabBtn) tabBtn.click();
   });
 
   // Clean Dead Torrents Form & Preview
@@ -532,6 +555,11 @@ function initEventListeners() {
     const ulKb = parseFloat(document.getElementById('cfg-max-upload-rate')?.value) || 0;
     const monthlyGb = parseFloat(document.getElementById('cfg-monthly-data-limit')?.value) || 0;
 
+    const filterCats = [];
+    document.querySelectorAll('.filter-cat-check:checked').forEach(cb => filterCats.push(cb.value));
+    const rawKeywords = document.getElementById('cfg-filter-keywords')?.value || '';
+    const filterKeywords = rawKeywords.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
     const payload = {
       prowlarr_url: document.getElementById('cfg-prowlarr-url').value,
       prowlarr_api_key: document.getElementById('cfg-prowlarr-key').value,
@@ -541,7 +569,11 @@ function initEventListeners() {
       max_upload_rate: Math.max(0, Math.round(ulKb * 1024)),
       monthly_data_limit_bytes: Math.max(0, Math.round(monthlyGb * 1024 * 1024 * 1024)),
       auto_prune_dead: document.getElementById('cfg-auto-prune-dead')?.checked || false,
-      auto_prune_days: parseInt(document.getElementById('cfg-auto-prune-days')?.value, 10) || 30
+      auto_prune_days: parseInt(document.getElementById('cfg-auto-prune-days')?.value, 10) || 30,
+      filter_enabled: document.getElementById('cfg-filter-enabled')?.checked || false,
+      filter_category_mode: document.getElementById('cfg-filter-category-mode')?.value || 'allowlist',
+      filter_categories: filterCats,
+      filter_keywords: filterKeywords
     };
 
     try {
@@ -1011,6 +1043,24 @@ async function loadConfig() {
     if (autoPruneDays && cfg.auto_prune_days) {
       autoPruneDays.value = cfg.auto_prune_days;
     }
+
+    const filterEnabledCheck = document.getElementById('cfg-filter-enabled');
+    if (filterEnabledCheck) {
+      filterEnabledCheck.checked = !!cfg.filter_enabled;
+    }
+    const filterModeSelect = document.getElementById('cfg-filter-category-mode');
+    if (filterModeSelect && cfg.filter_category_mode) {
+      filterModeSelect.value = cfg.filter_category_mode;
+    }
+    const activeCats = new Set((cfg.filter_categories || []).map(c => c.toLowerCase()));
+    document.querySelectorAll('.filter-cat-check').forEach(cb => {
+      cb.checked = activeCats.has(cb.value.toLowerCase());
+    });
+    const filterKwInput = document.getElementById('cfg-filter-keywords');
+    if (filterKwInput) {
+      filterKwInput.value = (cfg.filter_keywords || []).join(', ');
+    }
+    updateFilterPreview();
   } catch (e) {
     console.error('Config fetch error:', e);
   }
@@ -2010,6 +2060,102 @@ async function updatePrunePreview() {
     }
   } catch (e) {
     if (countEl) countEl.textContent = 'Error';
+  }
+}
+
+async function updateFilterPreview() {
+  const badge = document.getElementById('filter-unmatched-badge');
+  if (!badge) return;
+
+  const enabled = document.getElementById('cfg-filter-enabled')?.checked || false;
+  const mode = document.getElementById('cfg-filter-category-mode')?.value || 'allowlist';
+  const cats = [];
+  document.querySelectorAll('.filter-cat-check:checked').forEach(cb => cats.push(cb.value));
+  const rawKw = document.getElementById('cfg-filter-keywords')?.value || '';
+  const kws = rawKw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+  const params = new URLSearchParams({
+    enabled: enabled.toString(),
+    category_mode: mode,
+    categories: cats.join(','),
+    keywords: kws.join(',')
+  });
+
+  try {
+    const res = await fetch(`/api/v1/torrents/filter-preview?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      badge.textContent = `${data.violations.toLocaleString()} to purge`;
+      if (data.violations > 0) {
+        badge.style.background = 'rgba(239, 68, 68, 0.25)';
+        badge.style.color = '#f87171';
+      } else {
+        badge.style.background = 'rgba(16, 185, 129, 0.2)';
+        badge.style.color = '#34d399';
+      }
+    }
+  } catch (e) {
+    console.error('Filter preview error:', e);
+  }
+}
+
+async function handleExecuteFilterPurge() {
+  const btn = document.getElementById('btn-execute-filter-purge');
+  const msg = document.getElementById('filter-purge-msg');
+  const enabled = document.getElementById('cfg-filter-enabled')?.checked || false;
+  const mode = document.getElementById('cfg-filter-category-mode')?.value || 'allowlist';
+  const cats = [];
+  document.querySelectorAll('.filter-cat-check:checked').forEach(cb => cats.push(cb.value));
+  const rawKw = document.getElementById('cfg-filter-keywords')?.value || '';
+  const kws = rawKw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.origText = btn.textContent;
+    btn.textContent = '⏳ Purging Unmatched...';
+  }
+  if (msg) {
+    msg.style.display = 'block';
+    msg.style.background = 'rgba(6, 182, 212, 0.15)';
+    msg.style.color = 'var(--accent-cyan)';
+    msg.textContent = 'Purging non-matching torrents and cleaning SQLite FTS index...';
+  }
+
+  try {
+    const res = await fetch('/api/v1/torrents/filter-purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filter_enabled: enabled,
+        filter_category_mode: mode,
+        filter_categories: cats,
+        filter_keywords: kws
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (msg) {
+        msg.style.background = 'rgba(16, 185, 129, 0.15)';
+        msg.style.color = '#34d399';
+        msg.textContent = `✓ Successfully removed ${data.deleted.toLocaleString()} non-matching torrent${data.deleted === 1 ? '' : 's'}!`;
+      }
+      updateFilterPreview();
+      performSearch(undefined, false);
+      loadStats();
+    } else {
+      throw new Error(data.error || 'Failed to purge');
+    }
+  } catch (e) {
+    if (msg) {
+      msg.style.background = 'rgba(239, 68, 68, 0.15)';
+      msg.style.color = '#f87171';
+      msg.textContent = 'Error: ' + e.message;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origText || '🗑️ Purge Unmatched Now';
+    }
   }
 }
 

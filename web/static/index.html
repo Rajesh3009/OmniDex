@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=20">
+  <link rel="stylesheet" href="/static/css/style.css?v=21">
 </head>
 
 <body>
@@ -468,6 +468,7 @@
         <div class="settings-tabs"
           style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 18px;">
           <button type="button" class="tab-btn active" data-tab="tab-general">General & DHT</button>
+          <button type="button" class="tab-btn" data-tab="tab-filter">Retention & Rules</button>
           <button type="button" class="tab-btn" data-tab="tab-feeds">External Feeds (RSS/Torznab)</button>
           <button type="button" class="tab-btn" data-tab="tab-import">Direct Import</button>
           <button type="button" class="tab-btn" data-tab="tab-maintenance">Memory & Cleanup</button>
@@ -647,6 +648,82 @@
             </div>
           </div>
 
+          <!-- Tab 5: Retention & Rules -->
+          <div class="tab-panel" id="tab-filter" style="display: none;">
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 14px;">
+              Filter incoming torrents and purge unwanted categories or titles from the database.
+            </p>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">
+                <input type="checkbox" id="cfg-filter-enabled" style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+                <span>Enable Ingestion & Retention Rules</span>
+              </label>
+              <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">
+                When enabled, newly discovered torrents not matching your category policy or keywords are dropped at crawl time.
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-filter-category-mode">Category Policy Mode</label>
+              <select id="cfg-filter-category-mode" class="custom-select" style="width: 100%;">
+                <option value="allowlist">Allowlist (Keep selected categories only, drop all others)</option>
+                <option value="blocklist">Blocklist (Keep all categories except selected ones)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Select Categories</label>
+              <div id="filter-categories-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px;">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Video"> 🎬 Video
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Audio"> 🎵 Audio
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Software"> 💻 Software
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Games"> 🎮 Games
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Books"> 📚 Books
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="XXX"> 🔞 Adult / XXX
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Other"> 📦 Other
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-filter-keywords">Must-Include Title Keywords (Optional)</label>
+              <input type="text" id="cfg-filter-keywords" class="form-input" placeholder="e.g. 1080p, x265, Ubuntu, FLAC (comma-separated)">
+              <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">
+                OR logic: Any torrent whose title matches any of these keywords will be preserved, regardless of category.
+              </small>
+            </div>
+
+            <!-- Database Cleanup Preview Box -->
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px; margin-top: 18px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 600; color: #f87171;">Retroactive Database Purge</span>
+                <span id="filter-unmatched-badge" class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">0 to purge</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+                Remove all existing torrents in the database that do not match the above rules.
+              </p>
+              <div id="filter-purge-msg" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;"></div>
+              <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" id="btn-preview-filter-purge" class="btn btn-secondary" style="font-size: 0.85rem; padding: 6px 12px;">🔍 Check Unmatched</button>
+                <button type="button" id="btn-execute-filter-purge" class="btn" style="background: #dc2626; color: #fff; font-size: 0.85rem; padding: 6px 14px;">🗑️ Purge Unmatched Now</button>
+              </div>
+            </div>
+          </div>
+
           <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
             <button type="button" class="btn btn-secondary" data-close="modal-settings">Cancel</button>
             <button type="submit" class="btn btn-primary">Save Settings</button>
@@ -714,6 +791,14 @@
               Matching Torrents</button>
           </div>
         </form>
+
+        <div style="border-top: 1px solid var(--border-color); margin-top: 16px; padding-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-cyan); display: block;">Retention & Rules Cleanup</span>
+            <span style="font-size: 0.75rem; color: var(--text-dim);">Purge torrents violating Category & Keyword rules</span>
+          </div>
+          <button type="button" id="btn-open-filter-rules" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Rules & Purge ⚙️</button>
+        </div>
       </div>
     </div>
 
@@ -819,7 +904,7 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js?v=20"></script>
+    <script src="/static/js/app.js?v=21"></script>
 </body>
 
 </html>

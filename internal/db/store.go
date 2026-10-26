@@ -965,3 +965,115 @@ func (s *Store) GetOldestTorrents(limit int) ([]TorrentRecord, error) {
 	}
 	return results, nil
 }
+
+// FilterRules defines criteria for category and keyword retention
+type FilterRules struct {
+	Enabled      bool     `json:"filter_enabled"`
+	CategoryMode string   `json:"filter_category_mode"` // "allowlist" or "blocklist"
+	Categories   []string `json:"filter_categories"`
+	Keywords     []string `json:"filter_keywords"`
+}
+
+func buildFilterPurgeClause(rules FilterRules) (string, []any, bool) {
+	if !rules.Enabled {
+		return "", nil, false
+	}
+
+	var validCategories []string
+	for _, c := range rules.Categories {
+		tr := strings.ToLower(strings.TrimSpace(c))
+		if tr != "" {
+			validCategories = append(validCategories, tr)
+		}
+	}
+
+	var validKeywords []string
+	for _, kw := range rules.Keywords {
+		tr := strings.ToLower(strings.TrimSpace(kw))
+		if tr != "" {
+			validKeywords = append(validKeywords, tr)
+		}
+	}
+
+	if len(validCategories) == 0 && len(validKeywords) == 0 {
+		return "", nil, false
+	}
+
+	var notCategoryClause string
+	var categoryArgs []any
+
+	if len(validCategories) > 0 {
+		placeholders := make([]string, len(validCategories))
+		for i, c := range validCategories {
+			placeholders[i] = "?"
+			categoryArgs = append(categoryArgs, c)
+		}
+		inList := strings.Join(placeholders, ", ")
+
+		if strings.HasPrefix(strings.ToLower(rules.CategoryMode), "block") {
+			notCategoryClause = fmt.Sprintf("LOWER(category) IN (%s)", inList)
+		} else {
+			notCategoryClause = fmt.Sprintf("LOWER(category) NOT IN (%s)", inList)
+		}
+	} else {
+		if strings.HasPrefix(strings.ToLower(rules.CategoryMode), "block") {
+			notCategoryClause = "0 = 1"
+		} else {
+			notCategoryClause = "1 = 1"
+		}
+	}
+
+	var notKeywordClause string
+	var keywordArgs []any
+
+	if len(validKeywords) > 0 {
+		var notLikes []string
+		for _, kw := range validKeywords {
+			notLikes = append(notLikes, "LOWER(name) NOT LIKE ?")
+			keywordArgs = append(keywordArgs, "%"+kw+"%")
+		}
+		notKeywordClause = "(" + strings.Join(notLikes, " AND ") + ")"
+	} else {
+		notKeywordClause = "1 = 1"
+	}
+
+	clause := fmt.Sprintf("(%s) AND (%s)", notCategoryClause, notKeywordClause)
+	args := append(categoryArgs, keywordArgs...)
+	return clause, args, true
+}
+
+// CountFilterViolations returns the number of torrents that do not match retention filter rules
+func (s *Store) CountFilterViolations(rules FilterRules) (int64, error) {
+	clause, args, valid := buildFilterPurgeClause(rules)
+	if !valid {
+		return 0, nil
+	}
+
+	var count int64
+	query := "SELECT COUNT(1) FROM torrents WHERE " + clause
+	err := s.db.QueryRow(query, args...).Scan(&count)
+	return count, err
+}
+
+// PruneFilterViolations removes all torrents that do not match retention filter rules
+func (s *Store) PruneFilterViolations(rules FilterRules) (int64, error) {
+	clause, args, valid := buildFilterPurgeClause(rules)
+	if !valid {
+		return 0, nil
+	}
+
+	query := "DELETE FROM torrents WHERE " + clause
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	s.PruneMemory()
+	return affected, nil
+}
+

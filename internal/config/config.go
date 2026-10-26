@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 )
 
 type FeedConfig struct {
@@ -31,6 +32,10 @@ type Config struct {
 	AutoPruneDead         bool         `json:"auto_prune_dead"`
 	AutoPruneDays         int          `json:"auto_prune_days"`
 	ProwlarrAutoSyncMin   int          `json:"prowlarr_auto_sync_min"`
+	FilterEnabled         bool         `json:"filter_enabled"`
+	FilterCategoryMode    string       `json:"filter_category_mode"` // "allowlist" or "blocklist"
+	FilterCategories      []string     `json:"filter_categories"`
+	FilterKeywords        []string     `json:"filter_keywords"`
 }
 
 func DefaultConfig() Config {
@@ -67,6 +72,10 @@ func DefaultConfig() Config {
 		AutoPruneDead:       false,
 		AutoPruneDays:       30,
 		ProwlarrAutoSyncMin: 0,
+		FilterEnabled:       false,
+		FilterCategoryMode:  "allowlist",
+		FilterCategories:    []string{},
+		FilterKeywords:      []string{},
 	}
 }
 
@@ -94,3 +103,56 @@ func SaveConfig(path string, cfg Config) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
+
+// MatchesRetentionFilter returns true if a torrent should be kept based on current filter rules.
+// If filtering is disabled or no rules are set, it returns true for all torrents.
+func (c *Config) MatchesRetentionFilter(category, name string) bool {
+	if !c.FilterEnabled {
+		return true
+	}
+
+	hasCategories := len(c.FilterCategories) > 0
+	hasKeywords := len(c.FilterKeywords) > 0
+
+	// If enabled but no rules configured at all, do not drop everything
+	if !hasCategories && !hasKeywords {
+		return true
+	}
+
+	categoryMatch := false
+	if hasCategories {
+		found := false
+		for _, cat := range c.FilterCategories {
+			if strings.EqualFold(cat, category) {
+				found = true
+				break
+			}
+		}
+		if strings.HasPrefix(strings.ToLower(c.FilterCategoryMode), "block") {
+			categoryMatch = !found
+		} else { // default "allowlist"
+			categoryMatch = found
+		}
+	} else {
+		// If no category rule is configured, category match is true if blocklist mode, false if allowlist
+		if strings.HasPrefix(strings.ToLower(c.FilterCategoryMode), "block") {
+			categoryMatch = true
+		}
+	}
+
+	keywordMatch := false
+	if hasKeywords {
+		lowerName := strings.ToLower(name)
+		for _, kw := range c.FilterKeywords {
+			trimmed := strings.ToLower(strings.TrimSpace(kw))
+			if trimmed != "" && strings.Contains(lowerName, trimmed) {
+				keywordMatch = true
+				break
+			}
+		}
+	}
+
+	// Combination logic: OR logic (matches either valid category OR contains required keyword)
+	return categoryMatch || keywordMatch
+}
+

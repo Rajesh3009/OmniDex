@@ -108,3 +108,143 @@ func TestDeleteAndPruneTorrents(t *testing.T) {
 		t.Errorf("expected fresh dead torrent t3 to remain")
 	}
 }
+
+func TestRetentionFiltering(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omnidex-filter-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	// Insert test records
+	records := []*TorrentRecord{
+		{
+			InfoHash:    "1111111111111111111111111111111111111111",
+			Name:        "Inception 2010 1080p BluRay",
+			Size:        2048,
+			CreatedTime: time.Now(),
+			Category:    "Video",
+		},
+		{
+			InfoHash:    "2222222222222222222222222222222222222222",
+			Name:        "Ubuntu 24.04 LTS Desktop",
+			Size:        4096,
+			CreatedTime: time.Now(),
+			Category:    "Software",
+		},
+		{
+			InfoHash:    "3333333333333333333333333333333333333333",
+			Name:        "Windows 11 Activator Toolkit",
+			Size:        1024,
+			CreatedTime: time.Now(),
+			Category:    "Software",
+		},
+		{
+			InfoHash:    "4444444444444444444444444444444444444444",
+			Name:        "Random Audio Book Collection",
+			Size:        512,
+			CreatedTime: time.Now(),
+			Category:    "Audio",
+		},
+	}
+
+	for _, rec := range records {
+		if err := store.UpsertTorrent(rec); err != nil {
+			t.Fatalf("UpsertTorrent failed for %s: %v", rec.Name, err)
+		}
+	}
+
+	// Case 1: Allowlist Video only, no keywords.
+	// Violations should be: Ubuntu (Software), Windows (Software), Audio Book (Audio) -> 3 violations
+	v1, err := store.CountFilterViolations(FilterRules{
+		Enabled:      true,
+		CategoryMode: "allow",
+		Categories:   []string{"Video"},
+		Keywords:     nil,
+	})
+	if err != nil {
+		t.Fatalf("CountFilterViolations v1 failed: %v", err)
+	}
+	if v1 != 3 {
+		t.Errorf("expected 3 violations for Video allowlist, got %d", v1)
+	}
+
+	// Case 2: Allowlist Video only, but with keyword "Ubuntu".
+	// Video is kept (category match), Ubuntu is kept (keyword match).
+	// Violations should be: Windows (Software), Audio Book (Audio) -> 2 violations
+	v2, err := store.CountFilterViolations(FilterRules{
+		Enabled:      true,
+		CategoryMode: "allow",
+		Categories:   []string{"Video"},
+		Keywords:     []string{"ubuntu"},
+	})
+	if err != nil {
+		t.Fatalf("CountFilterViolations v2 failed: %v", err)
+	}
+	if v2 != 2 {
+		t.Errorf("expected 2 violations for Video allowlist with Ubuntu keyword, got %d", v2)
+	}
+
+	// Case 3: Blocklist "Software", no keywords.
+	// Violations: Ubuntu (Software), Windows (Software) -> 2 violations
+	v3, err := store.CountFilterViolations(FilterRules{
+		Enabled:      true,
+		CategoryMode: "block",
+		Categories:   []string{"Software"},
+		Keywords:     nil,
+	})
+	if err != nil {
+		t.Fatalf("CountFilterViolations v3 failed: %v", err)
+	}
+	if v3 != 2 {
+		t.Errorf("expected 2 violations for Software blocklist, got %d", v3)
+	}
+
+	// Case 4: Blocklist "Software", but with keyword "Ubuntu".
+	// Ubuntu is saved by keyword!
+	// Violation: only Windows (Software) -> 1 violation
+	v4, err := store.CountFilterViolations(FilterRules{
+		Enabled:      true,
+		CategoryMode: "block",
+		Categories:   []string{"Software"},
+		Keywords:     []string{"ubuntu"},
+	})
+	if err != nil {
+		t.Fatalf("CountFilterViolations v4 failed: %v", err)
+	}
+	if v4 != 1 {
+		t.Errorf("expected 1 violation for Software blocklist with Ubuntu keyword, got %d", v4)
+	}
+
+	// Case 5: Execute PruneFilterViolations with Case 4 rules
+	pruned, err := store.PruneFilterViolations(FilterRules{
+		Enabled:      true,
+		CategoryMode: "block",
+		Categories:   []string{"Software"},
+		Keywords:     []string{"ubuntu"},
+	})
+	if err != nil {
+		t.Fatalf("PruneFilterViolations failed: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("expected 1 pruned record, got %d", pruned)
+	}
+
+	// Verify Windows 11 was deleted, but Ubuntu was kept
+	winExists, _ := store.Exists("3333333333333333333333333333333333333333")
+	ubuntuExists, _ := store.Exists("2222222222222222222222222222222222222222")
+	if winExists {
+		t.Errorf("expected Windows 11 to be pruned")
+	}
+	if !ubuntuExists {
+		t.Errorf("expected Ubuntu to be preserved due to keyword rule")
+	}
+}
+

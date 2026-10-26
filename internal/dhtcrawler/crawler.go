@@ -146,6 +146,15 @@ type Crawler struct {
 	lastPersistWrite  int64
 	currentDlRate     float64
 	currentUlRate     float64
+
+	filterMu   sync.RWMutex
+	filterFunc func(category, name string) bool
+}
+
+func (c *Crawler) SetFilterFunc(fn func(category, name string) bool) {
+	c.filterMu.Lock()
+	defer c.filterMu.Unlock()
+	c.filterFunc = fn
 }
 
 func makeLimiter(bytesPerSec int64) *rate.Limiter {
@@ -611,6 +620,14 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 
 	if rec.FileCount == 0 {
 		rec.FileCount = 1
+	}
+
+	c.filterMu.RLock()
+	filter := c.filterFunc
+	c.filterMu.RUnlock()
+	if filter != nil && !filter(rec.Category, rec.Name) {
+		log.Printf("[DHT Crawler] Dropping %s (%s): unmatched by retention filter", rec.Name, hashHex)
+		return
 	}
 
 	if err := c.store.UpsertTorrent(rec); err != nil {
