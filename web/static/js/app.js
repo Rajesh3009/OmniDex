@@ -2254,36 +2254,49 @@ async function toggleFeed(id, enabled) {
   }
 }
 
-async function deleteFeed(id, name, btn) {
-  if (!confirm(`Delete external feed "${name || id}"?`)) {
-    return;
-  }
+let pendingDeleteFeedId = null;
+let pendingDeleteFeedName = null;
 
-  const row = btn ? btn.closest('.feed-item-card') : null;
-  if (row) {
-    row.style.opacity = '0.35';
-    row.style.pointerEvents = 'none';
+function deleteFeed(id, name) {
+  pendingDeleteFeedId = id;
+  pendingDeleteFeedName = name;
+  const nameEl = document.getElementById('confirm-delete-feed-name');
+  if (nameEl) {
+    nameEl.textContent = `Are you sure you want to remove "${name || id}"? This will stop syncing from this source.`;
   }
+  openModal('modal-confirm-delete-feed');
+}
+
+document.getElementById('btn-cancel-delete-feed')?.addEventListener('click', () => {
+  closeModal('modal-confirm-delete-feed');
+  pendingDeleteFeedId = null;
+  pendingDeleteFeedName = null;
+});
+
+document.getElementById('btn-confirm-delete-feed')?.addEventListener('click', async () => {
+  const id = pendingDeleteFeedId;
+  const name = pendingDeleteFeedName;
+  if (!id) return;
+
+  const btn = document.getElementById('btn-confirm-delete-feed');
+  if (btn) btn.textContent = 'Deleting...';
 
   try {
     let res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) {
       res = await fetch(`/api/v1/feeds/delete?id=${encodeURIComponent(id)}`, { method: 'POST' });
     }
-    const data = await res.json().catch(() => ({}));
-    if (res.ok || data.status === 'ok') {
-      showToast(`Feed "${name || id}" deleted successfully`, 'success');
-      if (row) row.remove();
-    } else {
-      showToast('Failed to delete feed: ' + (data.error || 'Server error'), 'error');
-    }
-    await loadFeedsList();
+    showToast(`Feed "${name || id}" deleted successfully`, 'success');
   } catch (e) {
-    console.error('Delete feed error:', e);
     showToast('Delete error: ' + e.message, 'error');
-    await loadFeedsList();
+  } finally {
+    if (btn) btn.textContent = 'Delete Feed';
+    closeModal('modal-confirm-delete-feed');
+    pendingDeleteFeedId = null;
+    pendingDeleteFeedName = null;
+    loadFeedsList();
   }
-}
+});
 
 window.syncSingleFeed = syncSingleFeed;
 window.toggleFeed = toggleFeed;
