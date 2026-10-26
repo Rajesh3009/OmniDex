@@ -245,7 +245,7 @@ func (ing *Ingester) fetchAndIngest(ctx context.Context, f config.FeedConfig) (i
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", "OmniDex/1.2.0 (Feed-Ingester)")
+	req.Header.Set("User-Agent", "OmniDex/1.2.1 (Feed-Ingester)")
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml, application/json, */*")
 
 	resp, err := ing.httpClient.Do(req)
