@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=18">
+  <link rel="stylesheet" href="/static/css/style.css?v=20">
 </head>
 <body>
   <div class="container">
@@ -412,7 +412,10 @@
         <label>API Key</label>
         <div style="position: relative; display: flex; align-items: center;">
           <div class="code-box masked-api-key" id="torznab-key-display" style="width: 100%; margin-bottom: 0;">local-indexer-secret-key</div>
-          <button type="button" class="btn-toggle-mask" data-target="torznab-key-display" title="Toggle visibility">👁️</button>
+          <div class="input-actions-wrap">
+            <button type="button" class="btn-icon-action btn-copy-key" data-target="torznab-key-display" title="Copy API Key">📋</button>
+            <button type="button" class="btn-icon-action btn-toggle-mask" data-target="torznab-key-display" title="Toggle visibility">👁️</button>
+          </div>
         </div>
       </div>
 
@@ -457,14 +460,20 @@
             <label for="cfg-prowlarr-key">Prowlarr API Key</label>
             <div style="position: relative; display: flex; align-items: center;">
               <input type="text" id="cfg-prowlarr-key" class="form-input masked-api-key" placeholder="Paste Prowlarr API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
-              <button type="button" class="btn-toggle-mask" data-target="cfg-prowlarr-key" title="Toggle visibility">👁️</button>
+              <div class="input-actions-wrap">
+                <button type="button" class="btn-icon-action btn-copy-key" data-target="cfg-prowlarr-key" title="Copy API Key">📋</button>
+                <button type="button" class="btn-icon-action btn-toggle-mask" data-target="cfg-prowlarr-key" title="Toggle visibility">👁️</button>
+              </div>
             </div>
           </div>
           <div class="form-group">
             <label for="cfg-torznab-key">Torznab Inbound API Key</label>
             <div style="position: relative; display: flex; align-items: center;">
               <input type="text" id="cfg-torznab-key" class="form-input masked-api-key" placeholder="Enter Torznab API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
-              <button type="button" class="btn-toggle-mask" data-target="cfg-torznab-key" title="Toggle visibility">👁️</button>
+              <div class="input-actions-wrap">
+                <button type="button" class="btn-icon-action btn-copy-key" data-target="cfg-torznab-key" title="Copy API Key">📋</button>
+                <button type="button" class="btn-icon-action btn-toggle-mask" data-target="cfg-torznab-key" title="Toggle visibility">👁️</button>
+              </div>
             </div>
           </div>
           <div class="form-group">
@@ -515,7 +524,10 @@
               <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml" autocomplete="off" data-lpignore="true">
               <div style="position: relative; display: flex; align-items: center;">
                 <input type="text" id="new-feed-apikey" class="form-input masked-api-key" placeholder="API Key (optional)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-form-type="other">
-                <button type="button" class="btn-toggle-mask" data-target="new-feed-apikey" title="Toggle visibility">👁️</button>
+                <div class="input-actions-wrap">
+                  <button type="button" class="btn-icon-action btn-copy-key" data-target="new-feed-apikey" title="Copy API Key">📋</button>
+                  <button type="button" class="btn-icon-action btn-toggle-mask" data-target="new-feed-apikey" title="Toggle visibility">👁️</button>
+                </div>
               </div>
               <input type="number" id="new-feed-interval" class="form-input" min="5" value="30" placeholder="Interval (min)">
             </div>
@@ -728,6 +740,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=18"></script>
+  <script src="/static/js/app.js?v=20"></script>
 </body>
 </html>

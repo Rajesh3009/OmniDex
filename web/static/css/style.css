@@ -1770,12 +1770,41 @@ body {
   -webkit-text-security: disc;
   font-family: monospace;
   letter-spacing: 1px;
-  padding-right: 38px !important;
+  padding-right: 68px !important;
 }
 
 .masked-api-key.unmasked {
   -webkit-text-security: none;
   letter-spacing: normal;
+}
+
+.input-actions-wrap {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-icon-action {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px 6px;
+  font-size: 0.88rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.btn-icon-action:hover {
+  color: var(--accent-cyan);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .btn-toggle-mask {
@@ -1784,10 +1813,6 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   padding: 6px 10px;
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
   font-size: 0.9rem;
   transition: color 0.2s ease;
 }

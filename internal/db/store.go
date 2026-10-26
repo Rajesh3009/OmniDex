@@ -164,7 +164,7 @@ func (s *Store) initSchema() error {
 
 	// Schema migrations for existing databases
 	columns := []string{
-		"ALTER TABLE torrents ADD COLUMN last_seen DATETIME DEFAULT CURRENT_TIMESTAMP",
+		"ALTER TABLE torrents ADD COLUMN last_seen DATETIME",
 		"ALTER TABLE torrents ADD COLUMN resolution TEXT DEFAULT ''",
 		"ALTER TABLE torrents ADD COLUMN codec TEXT DEFAULT ''",
 		"ALTER TABLE torrents ADD COLUMN quality TEXT DEFAULT ''",

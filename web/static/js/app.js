@@ -245,10 +245,22 @@ function initEventListeners() {
   });
 
   document.getElementById('btn-show-torznab').addEventListener('click', () => {
+    document.getElementById('torznab-key-display')?.classList.remove('unmasked');
+    const toggleBtn = document.querySelector('.btn-toggle-mask[data-target="torznab-key-display"]');
+    if (toggleBtn) {
+      toggleBtn.textContent = '👁️';
+      toggleBtn.title = 'Show value';
+    }
     openModal('modal-torznab');
   });
 
   document.getElementById('btn-show-settings').addEventListener('click', () => {
+    // Reset all API key inputs to hidden state by default
+    document.querySelectorAll('.masked-api-key').forEach(el => el.classList.remove('unmasked'));
+    document.querySelectorAll('.btn-toggle-mask').forEach(btn => {
+      btn.textContent = '👁️';
+      btn.title = 'Show value';
+    });
     openModal('modal-settings');
     loadFeedsList();
   });
@@ -269,6 +281,41 @@ function initEventListeners() {
         input.classList.remove('unmasked');
         btn.textContent = '👁️';
         btn.title = 'Show value';
+      }
+    });
+  });
+
+  // Copy API key to clipboard
+  document.querySelectorAll('.btn-copy-key').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const targetId = btn.getAttribute('data-target');
+      const targetEl = document.getElementById(targetId);
+      if (!targetEl) return;
+      const value = targetEl.value !== undefined ? targetEl.value : targetEl.textContent;
+      if (!value) {
+        showToast('No API key to copy', 'error');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(value.trim());
+        const origText = btn.textContent;
+        btn.textContent = '✓';
+        btn.style.color = '#34d399';
+        showToast('API key copied to clipboard!', 'success');
+        setTimeout(() => {
+          btn.textContent = origText;
+          btn.style.color = '';
+        }, 1500);
+      } catch (err) {
+        // Fallback for non-https or permission issues
+        const temp = document.createElement('textarea');
+        temp.value = value.trim();
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+        showToast('API key copied to clipboard!', 'success');
       }
     });
   });
