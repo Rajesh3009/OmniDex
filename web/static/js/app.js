@@ -60,7 +60,7 @@ function initEventListeners() {
       if (window.location.hash) {
         history.pushState(null, '', window.location.pathname);
       }
-      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+      document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m.id));
       resetFilters();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -859,12 +859,19 @@ function createBadge(container, labelText, onRemove) {
 }
 
 function openModal(id) {
-  document.getElementById(id).classList.add('active');
+  const el = document.getElementById(id);
+  if (el) {
+    el.classList.add('active');
+    el.style.display = 'flex';
+  }
 }
 
 function closeModal(id) {
   const modal = document.getElementById(id);
-  if (modal) modal.classList.remove('active');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.style.display = '';
+  }
   if (id === 'modal-details' && window.location.hash) {
     history.replaceState(null, '', window.location.pathname + window.location.search);
   }
@@ -2257,6 +2264,25 @@ async function toggleFeed(id, enabled) {
 let pendingDeleteFeedId = null;
 let pendingDeleteFeedName = null;
 
+async function executeDeleteFeed(id, name) {
+  try {
+    let res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      res = await fetch(`/api/v1/feeds/delete?id=${encodeURIComponent(id)}`, { method: 'POST' });
+    }
+    if (res.ok) {
+      showToast(`Feed "${name || id}" deleted successfully`, 'success');
+    } else {
+      const err = await res.text();
+      showToast(`Delete failed: ${err}`, 'error');
+    }
+  } catch (e) {
+    showToast('Delete error: ' + e.message, 'error');
+  } finally {
+    loadFeedsList();
+  }
+}
+
 function deleteFeed(id, name) {
   pendingDeleteFeedId = id;
   pendingDeleteFeedName = name;
@@ -2264,7 +2290,12 @@ function deleteFeed(id, name) {
   if (nameEl) {
     nameEl.textContent = `Are you sure you want to remove "${name || id}"? This will stop syncing from this source.`;
   }
-  openModal('modal-confirm-delete-feed');
+  const modal = document.getElementById('modal-confirm-delete-feed');
+  if (modal) {
+    openModal('modal-confirm-delete-feed');
+  } else {
+    executeDeleteFeed(id, name);
+  }
 }
 
 document.getElementById('btn-cancel-delete-feed')?.addEventListener('click', () => {
@@ -2282,19 +2313,12 @@ document.getElementById('btn-confirm-delete-feed')?.addEventListener('click', as
   if (btn) btn.textContent = 'Deleting...';
 
   try {
-    let res = await fetch(`/api/v1/feeds?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!res.ok) {
-      res = await fetch(`/api/v1/feeds/delete?id=${encodeURIComponent(id)}`, { method: 'POST' });
-    }
-    showToast(`Feed "${name || id}" deleted successfully`, 'success');
-  } catch (e) {
-    showToast('Delete error: ' + e.message, 'error');
+    await executeDeleteFeed(id, name);
   } finally {
     if (btn) btn.textContent = 'Delete Feed';
     closeModal('modal-confirm-delete-feed');
     pendingDeleteFeedId = null;
     pendingDeleteFeedName = null;
-    loadFeedsList();
   }
 });
 
