@@ -174,12 +174,19 @@ func main() {
 	mux.HandleFunc("/api/v1/dht/graph", srv.handleDHTGraph)
 	mux.HandleFunc("/api/v1/config", srv.handleConfig)
 
-	// Static UI assets
-	subFS, err := fs.Sub(staticFS, "web/static")
-	if err != nil {
-		log.Fatalf("Error sub static fs: %v", err)
+	// Static UI assets: preferentially serve from local disk if web/static exists for instant hot reloading without rebuild
+	var liveFS fs.FS
+	if info, err := os.Stat("web/static"); err == nil && info.IsDir() {
+		liveFS = os.DirFS("web/static")
+	} else {
+		subFS, err := fs.Sub(staticFS, "web/static")
+		if err != nil {
+			log.Fatalf("Error sub static fs: %v", err)
+		}
+		liveFS = subFS
 	}
-	fileServer := http.FileServer(http.FS(subFS))
+
+	fileServer := http.FileServer(http.FS(liveFS))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -187,7 +194,7 @@ func main() {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		indexBytes, _ := fs.ReadFile(subFS, "index.html")
+		indexBytes, _ := fs.ReadFile(liveFS, "index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(indexBytes)
 	})

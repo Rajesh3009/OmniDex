@@ -21,6 +21,79 @@ const filterState = {
   offset: 0
 };
 
+// ============================================================================
+// Modern In-App Toast Notifications (Completely replaces browser popup alerts)
+// ============================================================================
+function showToast(message, type = 'info', duration = 3500) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    container.setAttribute('aria-live', 'polite');
+    document.body.appendChild(container);
+  }
+
+  const icons = {
+    success: '✓',
+    error: '✕',
+    warning: '⚠️',
+    info: 'ℹ️'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'toast-icon';
+  iconSpan.textContent = icons[type] || 'ℹ️';
+
+  const bodyDiv = document.createElement('div');
+  bodyDiv.className = 'toast-body';
+  bodyDiv.textContent = message;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'toast-close';
+  closeBtn.title = 'Dismiss notification';
+  closeBtn.innerHTML = '&times;';
+
+  toast.appendChild(iconSpan);
+  toast.appendChild(bodyDiv);
+  toast.appendChild(closeBtn);
+
+  let dismissTimer = null;
+
+  const removeToast = () => {
+    if (dismissTimer) clearTimeout(dismissTimer);
+    toast.classList.remove('show');
+    toast.classList.add('hide');
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 250);
+  };
+
+  closeBtn.addEventListener('click', removeToast);
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.classList.add('show');
+  });
+
+  if (duration > 0) {
+    dismissTimer = setTimeout(removeToast, duration);
+  }
+}
+
+// Intercept native window.alert to guarantee no disruptive browser popup alerts are shown
+window.alert = function(msg) {
+  showToast(String(msg), 'info', 4000);
+};
+
+window.showToast = showToast;
+
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
   initStatsToggle();
@@ -439,7 +512,7 @@ function initEventListeners() {
     const msg = document.getElementById('import-status-msg');
     const inputVal = inputEl?.value.trim();
     if (!inputVal) {
-      alert('Please enter a magnet link or 40-character infohash');
+      showToast('Please enter a magnet link or 40-character infohash', 'warning');
       return;
     }
 
@@ -461,6 +534,7 @@ function initEventListeners() {
         msg.style.background = 'rgba(16, 185, 129, 0.15)';
         msg.style.color = '#34d399';
         msg.textContent = `✓ Imported: ${data.torrent.name}`;
+        showToast(`Imported: ${data.torrent.name}`, 'success');
         if (inputEl) inputEl.value = '';
         if (nameEl) nameEl.value = '';
         performSearch(undefined, false);
@@ -474,6 +548,7 @@ function initEventListeners() {
         msg.style.color = '#f87171';
         msg.textContent = 'Error: ' + err.message;
       }
+      showToast('Import error: ' + err.message, 'error');
     }
   });
 
@@ -484,12 +559,12 @@ function initEventListeners() {
     try {
       const res = await fetch('/api/v1/feeds/sync', { method: 'POST' });
       const data = await res.json();
-      alert(`Sync finished! Added ${data.added} new torrents.`);
+      showToast(`Sync finished! Added ${data.added} new torrents.`, 'success');
       loadFeedsList();
       performSearch(undefined, false);
       loadStats();
     } catch (e) {
-      alert('Sync failed: ' + e.message);
+      showToast('Sync failed: ' + e.message, 'error');
     } finally {
       if (btn) btn.textContent = '🔄 Sync All Feeds Now';
     }
@@ -503,7 +578,7 @@ function initEventListeners() {
     const interval = parseInt(document.getElementById('new-feed-interval')?.value, 10) || 30;
 
     if (!name || !url) {
-      alert('Please provide both Feed Name and Feed URL');
+      showToast('Please provide both Feed Name and Feed URL', 'warning');
       return;
     }
 
@@ -518,11 +593,12 @@ function initEventListeners() {
         document.getElementById('new-feed-url').value = '';
         document.getElementById('new-feed-apikey').value = '';
         loadFeedsList();
+        showToast(`Feed "${name}" added successfully`, 'success');
       } else {
-        alert('Failed to add feed');
+        showToast('Failed to add feed', 'error');
       }
     } catch (e) {
-      alert('Error: ' + e.message);
+      showToast('Error adding feed: ' + e.message, 'error');
     }
   });
 
@@ -530,6 +606,28 @@ function initEventListeners() {
   document.getElementById('btn-delete-torrent')?.addEventListener('click', () => {
     if (currentDetailTorrent) {
       deleteTorrentPrompt(currentDetailTorrent.info_hash, currentDetailTorrent.name);
+    }
+  });
+
+  // Confirm Delete Torrent Modal Listeners
+  document.getElementById('btn-cancel-delete-torrent')?.addEventListener('click', () => {
+    closeModal('modal-confirm-delete-torrent');
+    pendingDeleteTorrentHash = null;
+    pendingDeleteTorrentName = null;
+  });
+
+  document.getElementById('btn-confirm-delete-torrent')?.addEventListener('click', async () => {
+    const hash = pendingDeleteTorrentHash;
+    if (!hash) return;
+    const btn = document.getElementById('btn-confirm-delete-torrent');
+    if (btn) btn.textContent = 'Deleting...';
+    try {
+      await executeDeleteTorrent(hash);
+    } finally {
+      if (btn) btn.textContent = 'Delete Torrent';
+      closeModal('modal-confirm-delete-torrent');
+      pendingDeleteTorrentHash = null;
+      pendingDeleteTorrentName = null;
     }
   });
 
@@ -586,11 +684,13 @@ function initEventListeners() {
         closeModal('modal-settings');
         loadConfig();
         loadStats();
+        showToast('Settings saved successfully', 'success');
       } else {
-        alert('Failed to update config: ' + await resp.text());
+        const errText = await resp.text();
+        showToast('Failed to update config: ' + errText, 'error');
       }
     } catch (err) {
-      alert('Error updating config: ' + err.message);
+      showToast('Error updating config: ' + err.message, 'error');
     }
   });
 }
@@ -2004,22 +2104,39 @@ function setupCanvasInteractions(canvas) {
   };
 }
 
-async function deleteTorrentPrompt(hash, name) {
-  if (!confirm(`Are you sure you want to permanently delete this torrent from the database and search index?\n\n"${name}"\n(${hash})`)) {
-    return;
+let pendingDeleteTorrentHash = null;
+let pendingDeleteTorrentName = null;
+
+function deleteTorrentPrompt(hash, name) {
+  pendingDeleteTorrentHash = hash;
+  pendingDeleteTorrentName = name;
+  const titleEl = document.getElementById('confirm-delete-torrent-title');
+  const hashEl = document.getElementById('confirm-delete-torrent-hash');
+  if (titleEl) titleEl.textContent = name || 'Untitled Torrent';
+  if (hashEl) hashEl.textContent = hash;
+
+  const modal = document.getElementById('modal-confirm-delete-torrent');
+  if (modal) {
+    openModal('modal-confirm-delete-torrent');
+  } else {
+    executeDeleteTorrent(hash);
   }
+}
+
+async function executeDeleteTorrent(hash) {
   try {
     const res = await fetch(`/api/v1/torrent?hash=${encodeURIComponent(hash)}`, { method: 'DELETE' });
     if (res.ok) {
       closeModal('modal-details');
       performSearch(undefined, false);
       loadStats();
+      showToast('Torrent permanently deleted from database', 'success');
     } else {
       const err = await res.text();
-      alert('Failed to delete torrent: ' + err);
+      showToast('Failed to delete torrent: ' + err, 'error');
     }
   } catch (e) {
-    alert('Error deleting torrent: ' + e.message);
+    showToast('Error deleting torrent: ' + e.message, 'error');
   }
 }
 
@@ -2326,4 +2443,5 @@ window.syncSingleFeed = syncSingleFeed;
 window.toggleFeed = toggleFeed;
 window.deleteFeed = deleteFeed;
 window.loadFeedsList = loadFeedsList;
+window.deleteTorrentPrompt = deleteTorrentPrompt;
 

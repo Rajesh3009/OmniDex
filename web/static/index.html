@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=21">
+  <link rel="stylesheet" href="/static/css/style.css?v=22">
 </head>
 
 <body>
@@ -918,7 +918,27 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js?v=27"></script>
+    <!-- Confirm Delete Torrent Modal -->
+    <div class="modal-overlay" id="modal-confirm-delete-torrent" style="z-index: 10002;">
+      <div class="modal-content" style="max-width: 450px; text-align: center; padding: 24px;">
+        <div style="font-size: 2.2rem; margin-bottom: 12px;">🗑️</div>
+        <h3 style="margin: 0 0 8px 0; font-size: 1.15rem; color: #fff;">Delete Torrent?</h3>
+        <p id="confirm-delete-torrent-title" style="color: var(--text-main); font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; word-break: break-all;"></p>
+        <p id="confirm-delete-torrent-hash" style="color: var(--text-dim); font-size: 0.75rem; font-family: monospace; margin-bottom: 16px; word-break: break-all;"></p>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">
+          Are you sure you want to permanently delete this torrent from the database and search index?
+        </p>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-delete-torrent" data-close="modal-confirm-delete-torrent" style="flex: 1;">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btn-confirm-delete-torrent" style="flex: 1; background: #ef4444; border-color: #ef4444;">Delete Torrent</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Global In-App Toast Container -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <script src="/static/js/app.js?v=28"></script>
 </body>
 
 </html>
