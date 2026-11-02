@@ -327,16 +327,12 @@ function initEventListeners() {
     openModal('modal-torznab');
   });
 
-  document.getElementById('btn-show-settings').addEventListener('click', () => {
-    // Reset all API key inputs to hidden state by default
-    document.querySelectorAll('.masked-api-key').forEach(el => el.classList.remove('unmasked'));
-    document.querySelectorAll('.btn-toggle-mask').forEach(btn => {
-      btn.textContent = '👁️';
-      btn.title = 'Show value';
+  const btnSettings = document.getElementById('btn-show-settings');
+  if (btnSettings && btnSettings.tagName === 'BUTTON') {
+    btnSettings.addEventListener('click', () => {
+      window.location.href = '/settings';
     });
-    openModal('modal-settings');
-    loadFeedsList();
-  });
+  }
 
   // Toggle API key visibility without browser password prompts
   document.querySelectorAll('.btn-toggle-mask').forEach(btn => {
@@ -428,9 +424,7 @@ function initEventListeners() {
   document.getElementById('btn-execute-filter-purge')?.addEventListener('click', handleExecuteFilterPurge);
   document.getElementById('btn-open-filter-rules')?.addEventListener('click', () => {
     closeModal('modal-prune-dead');
-    openModal('modal-settings');
-    const tabBtn = document.querySelector('[data-tab="tab-filter"]');
-    if (tabBtn) tabBtn.click();
+    window.location.href = '/settings#filter';
   });
 
   // Clean Dead Torrents Form & Preview
@@ -673,7 +667,7 @@ function initEventListeners() {
   });
 
   // Settings form submission
-  document.getElementById('settings-form').addEventListener('submit', async (e) => {
+  document.getElementById('settings-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const dlKb = parseFloat(document.getElementById('cfg-max-download-rate')?.value) || 0;
     const ulKb = parseFloat(document.getElementById('cfg-max-upload-rate')?.value) || 0;
@@ -1156,10 +1150,15 @@ async function loadConfig() {
     if (!res.ok) return;
     const cfg = await res.json();
 
-    document.getElementById('cfg-prowlarr-url').value = cfg.prowlarr_url || '';
-    document.getElementById('cfg-prowlarr-key').value = cfg.prowlarr_api_key || '';
-    document.getElementById('cfg-torznab-key').value = cfg.torznab_api_key || '';
-    document.getElementById('cfg-dht-workers').value = cfg.dht_workers || 15;
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val ?? '';
+    };
+
+    setVal('cfg-prowlarr-url', cfg.prowlarr_url);
+    setVal('cfg-prowlarr-key', cfg.prowlarr_api_key);
+    setVal('cfg-torznab-key', cfg.torznab_api_key);
+    setVal('cfg-dht-workers', cfg.dht_workers || 15);
 
     const dlRateInput = document.getElementById('cfg-max-download-rate');
     if (dlRateInput) {
@@ -1174,8 +1173,10 @@ async function loadConfig() {
       monthlyLimitInput.value = cfg.monthly_data_limit_bytes ? (cfg.monthly_data_limit_bytes / (1024 * 1024 * 1024)).toFixed(1) : 0;
     }
 
-    document.getElementById('torznab-key-display').textContent = cfg.torznab_api_key || 'N/A';
-    document.getElementById('torznab-url-display').textContent = `${window.location.origin}/api/v1/torznab`;
+    const torznabKeyDisplay = document.getElementById('torznab-key-display');
+    if (torznabKeyDisplay) torznabKeyDisplay.textContent = cfg.torznab_api_key || 'N/A';
+    const torznabUrlDisplay = document.getElementById('torznab-url-display');
+    if (torznabUrlDisplay) torznabUrlDisplay.textContent = `${window.location.origin}/api/v1/torznab`;
 
     const autoPruneCheck = document.getElementById('cfg-auto-prune-dead');
     if (autoPruneCheck) {
@@ -1202,7 +1203,9 @@ async function loadConfig() {
     if (filterKwInput) {
       filterKwInput.value = (cfg.filter_keywords || []).join(', ');
     }
-    updateFilterPreview();
+    if (typeof updateFilterPreview === 'function' && document.getElementById('filter-unmatched-badge')) {
+      updateFilterPreview();
+    }
 
     const scraperEnabled = document.getElementById('cfg-scraper-enabled');
     if (scraperEnabled) scraperEnabled.checked = cfg.scraper_enabled !== false;
@@ -1216,7 +1219,9 @@ async function loadConfig() {
     if (scraperUrl) scraperUrl.value = cfg.scraper_trackers_url || '';
     const scraperTrackers = document.getElementById('cfg-scraper-trackers');
     if (scraperTrackers && cfg.scraper_trackers) scraperTrackers.value = cfg.scraper_trackers.join('\n');
-    loadScraperStats();
+    if (typeof loadScraperStats === 'function' && document.getElementById('scraper-stat-total')) {
+      loadScraperStats();
+    }
   } catch (e) {
     console.error('Config fetch error:', e);
   }

@@ -201,6 +201,18 @@ func main() {
 
 	fileServer := http.FileServer(http.FS(liveFS))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
+		settingsBytes, err := fs.ReadFile(liveFS, "settings.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(settingsBytes)
+	})
+	mux.HandleFunc("/settings/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			// fallback to static file if exists or 404

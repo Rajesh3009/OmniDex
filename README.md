@@ -29,7 +29,7 @@
    - Glassmorphic dark UI dashboard with real-time stats (indexed count, KRPC announces, wire resolving status).
    - Instant search with category filters and pagination.
    - File tree inspector and one-click Magnet link launcher.
-   - Built-in settings modal to configure API keys, Prowlarr URL, and worker threads.
+   - Dedicated Settings control center (`/settings`) to configure API keys, Prowlarr URL, worker threads, feeds, tracker scraper, direct import, retention rules, and memory janitor.
 
 6. **Content Quality & Metadata Tagging Engine**
    - Heuristic extraction of resolution (4K, 1080p, 720p, 480p), video codec (x265, x264, AV1, XviD), source quality (BluRay, REMUX, WEB-DL, WEBRip, HDTV, CAM), audio formats (Atmos, DTS-HD, TrueHD, 5.1/AC3, FLAC, AAC), HDR (Dolby Vision, HDR10+, HDR), and release groups.

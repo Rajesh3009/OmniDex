@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniDex - System Settings</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <a href="/" class="brand" style="text-decoration: none; color: inherit;">
+        <div class="logo-box">
+          <span class="logo-icon">⚡</span>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h1 class="brand-title">OmniDex</h1>
+            <span class="badge badge-dht">Settings</span>
+            <span class="version-tag" style="background: rgba(255, 255, 255, 0.08); padding: 2px 8px; border-radius: 9999px; font-size: 0.72rem; color: var(--text-dim);">v1.3.0</span>
+          </div>
+          <p class="brand-subtitle">Control Center & Ingestion Configuration</p>
+        </div>
+      </a>
+
+      <div class="header-actions">
+        <a href="/" class="nav-pill" style="text-decoration: none; display: flex; align-items: center; gap: 6px;">
+          <span>←</span> Back to Torrents
+        </a>
+        <button type="button" id="btn-header-save" class="btn btn-primary" style="padding: 8px 18px; font-size: 0.88rem;">
+          💾 Save Settings
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Settings Layout -->
+    <div class="settings-page-layout">
+      <!-- Left Navigation Sidebar -->
+      <aside class="settings-sidebar">
+        <div class="settings-sidebar-header">
+          <span class="settings-sidebar-title">Configuration Categories</span>
+        </div>
+        <button type="button" class="settings-nav-item active" data-tab="tab-general">
+          <span class="nav-icon">⚙️</span>
+          <span>General & DHT</span>
+          <span class="nav-badge">Core</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-filter">
+          <span class="nav-icon">🛡️</span>
+          <span>Retention & Rules</span>
+          <span class="nav-badge">Filters</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-feeds">
+          <span class="nav-icon">🔔</span>
+          <span>External Feeds</span>
+          <span class="nav-badge" id="badge-feeds-count">6 types</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-scraper">
+          <span class="nav-icon">📡</span>
+          <span>Live Tracker Scraper</span>
+          <span class="nav-badge" style="color: #4ade80;">BEP 15</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-import">
+          <span class="nav-icon">🧲</span>
+          <span>Direct Import</span>
+          <span class="nav-badge">CSV/URI</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-maintenance">
+          <span class="nav-icon">🧹</span>
+          <span>Memory & Janitor</span>
+          <span class="nav-badge">System</span>
+        </button>
+      </aside>
+
+      <!-- Right Content Panels -->
+      <main class="settings-content">
+        <form id="settings-form" autocomplete="off" onsubmit="return false;">
+          
+          <!-- TAB 1: General & DHT Network -->
+          <section class="settings-section-card active" id="tab-general">
+            <div class="settings-card-header">
+              <div>
+                <h2>⚙️ General Network & DHT Wire</h2>
+                <p>Configure Prowlarr indexer integration, inbound Torznab API keys, DHT worker pools, and wire bandwidth limits.</p>
+              </div>
+              <span class="badge badge-dht">Network</span>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-prowlarr-url">Prowlarr Base URL</label>
+              <input type="text" id="cfg-prowlarr-url" class="form-input" placeholder="http://localhost:9696"
+                autocomplete="off" spellcheck="false" data-lpignore="true">
+              <small style="color: var(--text-dim); font-size: 0.78rem; margin-top: 5px; display: block;">Local or remote instance of Prowlarr used for federated searching.</small>
+            </div>
+
+            <div class="settings-form-row">
+              <div class="form-group">
+                <label for="cfg-prowlarr-key">Prowlarr API Key</label>
+                <div style="position: relative; display: flex; align-items: center;">
+                  <input type="text" id="cfg-prowlarr-key" class="form-input masked-api-key"
+                    placeholder="Paste Prowlarr API key" autocomplete="off" spellcheck="false" data-lpignore="true">
+                  <div class="input-actions-wrap">
+                    <button type="button" class="btn-icon-action btn-copy-key" data-target="cfg-prowlarr-key" title="Copy API Key">📋</button>
+                    <button type="button" class="btn-icon-action btn-toggle-mask" data-target="cfg-prowlarr-key" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-torznab-key">Torznab Inbound API Key</label>
+                <div style="position: relative; display: flex; align-items: center;">
+                  <input type="text" id="cfg-torznab-key" class="form-input masked-api-key"
+                    placeholder="Enter Torznab API key" autocomplete="off" spellcheck="false" data-lpignore="true">
+                  <div class="input-actions-wrap">
+                    <button type="button" class="btn-icon-action btn-copy-key" data-target="cfg-torznab-key" title="Copy API Key">📋</button>
+                    <button type="button" class="btn-icon-action btn-toggle-mask" data-target="cfg-torznab-key" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-dht-workers">DHT Metadata Resolver Workers</label>
+              <input type="number" id="cfg-dht-workers" class="form-input" min="5" max="100" value="15">
+              <small style="color: var(--text-dim); font-size: 0.78rem; margin-top: 5px; display: block;">Number of concurrent goroutine workers resolving BEP 9 bencoded metadata from DHT peers (Default: 15).</small>
+            </div>
+
+            <div class="settings-card-header" style="margin-top: 28px; padding-bottom: 12px;">
+              <div>
+                <h3 style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);">🌐 Bandwidth & Data Limits</h3>
+                <p>Throttles apply strictly to DHT wire swarm handshakes and metadata exchanges.</p>
+              </div>
+            </div>
+
+            <div class="settings-form-row">
+              <div class="form-group">
+                <label for="cfg-max-download-rate">Download Bandwidth Limit (KB/s)</label>
+                <input type="number" id="cfg-max-download-rate" class="form-input" min="0" placeholder="0 (unlimited)">
+                <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">0 = unlimited download rate.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-max-upload-rate">Upload Bandwidth Limit (KB/s)</label>
+                <input type="number" id="cfg-max-upload-rate" class="form-input" min="0" placeholder="0 (unlimited)">
+                <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">0 = unlimited upload rate.</small>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-monthly-data-limit">Monthly Internet Data Limit (GB)</label>
+              <input type="number" id="cfg-monthly-data-limit" class="form-input" min="0" step="0.1" placeholder="0 (unlimited)">
+              <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Cap total monthly wire bandwidth (download + upload combined). DHT crawler pauses when budget is exhausted.</small>
+            </div>
+          </section>
+
+          <!-- TAB 2: Retention & Ingestion Rules -->
+          <section class="settings-section-card" id="tab-filter">
+            <div class="settings-card-header">
+              <div>
+                <h2>🛡️ Ingestion Policies & Retention Rules</h2>
+                <p>Filter incoming torrents by category or title keywords at crawl time, and optionally purge unmatched items from SQLite.</p>
+              </div>
+              <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd;">Retention</span>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
+                <input type="checkbox" id="cfg-filter-enabled" style="accent-color: var(--accent-cyan); width: 18px; height: 18px;">
+                <span>Enable Ingestion & Retention Rules</span>
+              </label>
+              <small style="color: var(--text-dim); font-size: 0.8rem; margin-top: 6px; display: block;">
+                When active, newly discovered torrents that do not match your category policy or keywords are rejected at crawl time.
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-filter-category-mode">Category Policy Mode</label>
+              <select id="cfg-filter-category-mode" class="custom-select" style="width: 100%;">
+                <option value="allowlist">Allowlist (Keep selected categories only, drop all others)</option>
+                <option value="blocklist">Blocklist (Keep all categories except selected ones)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Target Categories</label>
+              <div id="filter-categories-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px;">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Video"> 🎬 Video
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Audio"> 🎵 Audio
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Software"> 💻 Software
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Games"> 🎮 Games
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Books"> 📚 Books
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="XXX"> 🔞 Adult / XXX
+                </label>
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem;">
+                  <input type="checkbox" class="filter-cat-check" value="Other"> 📦 Other
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-filter-keywords">Must-Include Title Keywords (Optional)</label>
+              <input type="text" id="cfg-filter-keywords" class="form-input" placeholder="e.g. 1080p, x265, Ubuntu, FLAC (comma-separated)">
+              <small style="color: var(--text-dim); font-size: 0.78rem; margin-top: 5px; display: block;">
+                OR logic: Any release whose title matches any of these keywords will be preserved, regardless of category.
+              </small>
+            </div>
+
+            <!-- Database Cleanup Preview Box -->
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 18px; margin-top: 24px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 600; color: #f87171; font-size: 0.95rem;">Retroactive Database Purge</span>
+                <span id="filter-unmatched-badge" class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">0 to purge</span>
+              </div>
+              <p style="font-size: 0.84rem; color: var(--text-muted); margin-bottom: 14px;">
+                Scan your existing database against these rules and delete records that do not match.
+              </p>
+              <div id="filter-purge-msg" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;"></div>
+              <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" id="btn-preview-filter-purge" class="btn btn-secondary" style="font-size: 0.85rem; padding: 7px 14px;">🔍 Check Unmatched</button>
+                <button type="button" id="btn-execute-filter-purge" class="btn" style="background: #dc2626; color: #fff; font-size: 0.85rem; padding: 7px 16px;">🗑️ Purge Unmatched Now</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- TAB 3: External Feeds -->
+          <section class="settings-section-card" id="tab-feeds">
+            <div class="settings-card-header">
+              <div>
+                <h2>🔔 External Feeds & API Scrapers</h2>
+                <p>Periodically ingest releases from RSS/Atom feeds, Torznab endpoints, EZTV API, YTS Movies, The Pirate Bay (Apibay), and Torrents.csv.</p>
+              </div>
+              <button type="button" id="btn-sync-all-feeds" class="btn btn-secondary" style="font-size: 0.82rem; padding: 7px 14px;">
+                🔄 Sync All Feeds Now
+              </button>
+            </div>
+
+            <div id="feeds-list-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+              <!-- Dynamically populated feeds -->
+            </div>
+
+            <!-- Add Feed Card -->
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 18px;">
+              <span style="font-size: 0.92rem; font-weight: 600; color: var(--accent-cyan); display: block; margin-bottom: 12px;">➕ Add External Feed</span>
+              
+              <div class="settings-form-row" style="margin-bottom: 12px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label for="new-feed-name">Feed Name</label>
+                  <input type="text" id="new-feed-name" class="form-input" placeholder="Feed Name (e.g. Nyaa Anime, YTS Movies)">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label for="new-feed-type">Feed Type</label>
+                  <select id="new-feed-type" class="custom-select" style="width: 100%;">
+                    <option value="rss" selected>RSS 2.0 / Atom Feed</option>
+                    <option value="eztv">EZTV API (JSON)</option>
+                    <option value="yts">YTS Movie API (JSON)</option>
+                    <option value="tpb">The Pirate Bay (Apibay JSON)</option>
+                    <option value="torrents-csv">Torrents.csv (Search API)</option>
+                    <option value="torznab">Torznab Indexer</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 2fr 1fr 100px; gap: 10px; margin-bottom: 14px;">
+                <div>
+                  <label for="new-feed-url" style="font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 5px;">Feed / API Endpoint URL</label>
+                  <input type="text" id="new-feed-url" class="form-input" placeholder="https://feed.url/rss.xml" autocomplete="off" data-lpignore="true">
+                </div>
+                <div>
+                  <label for="new-feed-apikey" style="font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 5px;">API Key (Optional)</label>
+                  <div style="position: relative; display: flex; align-items: center;">
+                    <input type="text" id="new-feed-apikey" class="form-input masked-api-key" placeholder="API Key" autocomplete="off" spellcheck="false" data-lpignore="true">
+                    <div class="input-actions-wrap">
+                      <button type="button" class="btn-icon-action btn-copy-key" data-target="new-feed-apikey" title="Copy">📋</button>
+                      <button type="button" class="btn-icon-action btn-toggle-mask" data-target="new-feed-apikey" title="Toggle">👁️</button>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label for="new-feed-interval" style="font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 5px;">Interval (min)</label>
+                  <input type="number" id="new-feed-interval" class="form-input" min="5" value="30">
+                </div>
+              </div>
+
+              <button type="button" id="btn-add-feed" class="btn btn-secondary" style="width: 100%; font-size: 0.88rem; padding: 9px;">➕ Add Feed to Schedule</button>
+            </div>
+          </section>
+
+          <!-- TAB 4: Live BEP 15 UDP Tracker Scraper -->
+          <section class="settings-section-card" id="tab-scraper">
+            <div class="settings-card-header">
+              <div>
+                <h2>📡 Live BEP 15 UDP Tracker Scraper</h2>
+                <p>Periodically queries public BitTorrent trackers with binary UDP packets (BEP 15) to track live Seeders, Leechers, and completed swarms.</p>
+              </div>
+              <span id="scraper-live-status-badge" class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80;">Active</span>
+            </div>
+
+            <!-- Scraper Live Dashboard Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px;">
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Total Torrents Scraped</div>
+                <div id="scraper-stat-total" style="font-size: 1.4rem; font-weight: 700; color: var(--text-bright); margin-top: 4px;">0</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Successful Swarm Checks</div>
+                <div id="scraper-stat-success" style="font-size: 1.4rem; font-weight: 700; color: #4ade80; margin-top: 4px;">0</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Active UDP Trackers</div>
+                <div id="scraper-stat-trackers" style="font-size: 1.4rem; font-weight: 700; color: #60a5fa; margin-top: 4px;">0</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Last Scrape Run</div>
+                <div id="scraper-stat-last" style="font-size: 0.95rem; font-weight: 600; color: var(--text-dim); margin-top: 8px;">Never</div>
+              </div>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <div>
+                <label for="cfg-scraper-enabled" style="margin-bottom: 2px; font-weight: 600; font-size: 0.92rem;">Enable Periodic Background Scraper</label>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Continuously queries stale torrent swarms in round-robin batches</div>
+              </div>
+              <input type="checkbox" id="cfg-scraper-enabled" class="form-checkbox" style="width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent-cyan);">
+            </div>
+
+            <div class="settings-form-row">
+              <div class="form-group">
+                <label for="cfg-scraper-interval">Scrape Interval (Minutes)</label>
+                <input type="number" id="cfg-scraper-interval" class="form-input" min="2" max="1440" placeholder="30">
+                <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Delay between background batch scrape cycles.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-scraper-batch-size">Batch Size per Pass</label>
+                <input type="number" id="cfg-scraper-batch-size" class="form-input" min="5" max="300" placeholder="50">
+                <small style="color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; display: block;">Number of stale torrents checked per run.</small>
+              </div>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <div>
+                <label for="cfg-scraper-autoupdate" style="margin-bottom: 2px; font-weight: 600; font-size: 0.92rem;">Auto-Update Public Trackers</label>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Automatically syncs best live UDP trackers from curated GitHub tracker lists</div>
+              </div>
+              <input type="checkbox" id="cfg-scraper-autoupdate" class="form-checkbox" style="width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent-cyan);">
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-scraper-trackers-url">Tracker List Remote Sync URL</label>
+              <input type="text" id="cfg-scraper-trackers-url" class="form-input" placeholder="https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt">
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-scraper-trackers">Active UDP Trackers (one URL per line)</label>
+              <textarea id="cfg-scraper-trackers" class="form-input" rows="5" placeholder="udp://tracker.opentrackr.org:1337/announce" style="font-family: monospace; font-size: 0.82rem;"></textarea>
+            </div>
+          </section>
+
+          <!-- TAB 5: Direct Import & CSV Bulk Ingest -->
+          <section class="settings-section-card" id="tab-import">
+            <div class="settings-card-header">
+              <div>
+                <h2>🧲 Direct Import & CSV Bulk Ingestion</h2>
+                <p>Quickly index torrents by pasting a Magnet link, a 40-character SHA1 infohash, or raw lines from a <strong>Torrents.csv</strong> dump. You can also upload a <code>.csv</code> file for instant bulk importing.</p>
+              </div>
+              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9;">Import</span>
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label for="import-input" style="margin-bottom: 0; font-weight: 600;">Magnet URI, InfoHash, or Torrents.csv Dump</label>
+                <div>
+                  <input type="file" id="import-csv-file" accept=".csv,.txt" style="display: none;">
+                  <button type="button" id="btn-upload-csv" class="btn btn-secondary" style="font-size: 0.8rem; padding: 5px 12px;">📁 Load .CSV File</button>
+                </div>
+              </div>
+              <textarea id="import-input" class="form-input" rows="6"
+                placeholder="magnet:?xt=urn:btih:... or 40-char hex hash or paste CSV lines (infohash,name,size_bytes,...)"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="import-name">Source / Title Tag (Optional)</label>
+              <input type="text" id="import-name" class="form-input" placeholder="Custom title (for single magnet) or source label (e.g. torrents-csv)">
+            </div>
+
+            <div id="import-status-msg" style="display: none; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.88rem;"></div>
+
+            <button type="button" id="btn-execute-import" class="btn btn-primary" style="width: 100%; padding: 10px; font-size: 0.95rem;">
+              🧲 Import & Index Torrent(s)
+            </button>
+          </section>
+
+          <!-- TAB 6: Memory & Janitor -->
+          <section class="settings-section-card" id="tab-maintenance">
+            <div class="settings-card-header">
+              <div>
+                <h2>🧹 Memory Janitor & System Maintenance</h2>
+                <p>Monitor Go runtime heap allocations, release idle OS virtual memory, checkpoint SQLite WAL, and schedule dead torrent purges.</p>
+              </div>
+              <span class="badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6;">System</span>
+            </div>
+
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 18px; margin-bottom: 22px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <div>
+                  <span style="font-weight: 600; color: #ec4899; display: block; font-size: 0.95rem;">Memory Optimizer & Cache Janitor</span>
+                  <span style="font-size: 0.82rem; color: var(--text-dim);">Forces Go runtime garbage collection, shrinks unused SQLite page cache, and returns memory to OS.</span>
+                </div>
+                <button type="button" id="btn-janitor-shrink" class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.85rem;">
+                  🧹 Free Memory Now
+                </button>
+              </div>
+
+              <div id="janitor-mem-breakdown" style="font-size: 0.85rem; color: var(--text-muted); display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; background: rgba(0,0,0,0.2); padding: 12px 16px; border-radius: 8px;">
+                <span>Current Working Set: <strong id="janitor-rss">-</strong></span>
+                <span>Go Heap In-Use: <strong id="janitor-heap">-</strong></span>
+                <span>OS Reserved (Sys): <strong id="janitor-sys">-</strong></span>
+                <span>Active Goroutines: <strong id="janitor-goroutines">-</strong></span>
+              </div>
+            </div>
+
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 18px;">
+              <span style="font-weight: 600; color: #f87171; display: block; margin-bottom: 10px; font-size: 0.95rem;">Automated Dead Torrent Purge</span>
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                  <input type="checkbox" id="cfg-auto-prune-dead" style="accent-color: #ef4444; width: 17px; height: 17px;">
+                  <span>Automatically purge dead torrents every 6 hours</span>
+                </label>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="cfg-auto-prune-days">Prune torrents with 0 seeders older than (days)</label>
+                <input type="number" id="cfg-auto-prune-days" class="form-input" min="1" max="365" value="30">
+              </div>
+            </div>
+          </section>
+
+          <!-- Sticky Bottom Save Action Bar -->
+          <div class="settings-sticky-footer">
+            <div class="settings-footer-hint">
+              <span>Quick save:</span>
+              <span class="kbd-badge">Ctrl</span> + <span class="kbd-badge">S</span>
+              <span id="save-status-indicator" style="margin-left: 12px; color: var(--text-dim);">Ready</span>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <a href="/" class="btn btn-secondary" style="text-decoration: none;">Cancel</a>
+              <button type="submit" id="btn-save-settings" class="btn btn-primary" style="padding: 9px 24px;">
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <!-- Confirm Feed Delete Modal -->
+    <div class="modal-overlay" id="modal-confirm-delete-feed" style="z-index: 10001;">
+      <div class="modal-content" style="max-width: 420px; text-align: center; padding: 24px;">
+        <h3 style="margin-bottom: 12px; color: #f87171;">Delete Feed?</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
+          Are you sure you want to remove <strong id="delete-feed-name" style="color: #fff;"></strong>? Automated background synchronization will stop immediately.
+        </p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-delete-feed" style="flex: 1;">Cancel</button>
+          <button type="button" class="btn" id="btn-confirm-delete-feed" style="background: #dc2626; color: #fff; flex: 1;">Delete Feed</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script src="/static/js/settings.js"></script>
+</body>
+
+</html>
