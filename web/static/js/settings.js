@@ -346,7 +346,7 @@ async function loadFeedsList() {
     const feeds = await res.json();
 
     const badgeFeeds = document.getElementById('badge-feeds-count');
-    if (badgeFeeds) badgeFeeds.textContent = `${feeds.length} configured`;
+    if (badgeFeeds) badgeFeeds.textContent = `${feeds.length} Active`;
 
     if (!feeds || feeds.length === 0) {
       container.innerHTML = `

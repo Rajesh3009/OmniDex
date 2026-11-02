@@ -1998,7 +1998,7 @@ body {
 
 .settings-page-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 310px 1fr;
   gap: 28px;
   align-items: flex-start;
   margin-bottom: 60px;
@@ -2016,17 +2016,17 @@ body {
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .settings-sidebar-header {
-  padding: 8px 12px 14px 12px;
+  padding: 6px 8px 12px 8px;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .settings-sidebar-title {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2038,24 +2038,27 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 16px;
+  height: 48px;
+  padding: 0 12px;
   border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-decoration: none;
+  user-select: none;
+  box-sizing: border-box;
 }
 
 .settings-nav-item:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
   border-color: rgba(255, 255, 255, 0.08);
-  transform: translateX(3px);
+  transform: translateX(2px);
 }
 
 .settings-nav-item.active {
@@ -2066,23 +2069,105 @@ body {
   box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
 }
 
-.settings-nav-item .nav-icon {
-  font-size: 1.15rem;
+.settings-nav-item .nav-icon-box {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
   flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.settings-nav-item:hover .nav-icon-box {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.settings-nav-item.active .nav-icon-box {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: rgba(6, 182, 212, 0.4);
+}
+
+.settings-nav-item .nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.88rem;
 }
 
 .settings-nav-item .nav-badge {
   margin-left: auto;
+  flex-shrink: 0;
   font-size: 0.72rem;
-  padding: 2px 7px;
+  font-weight: 600;
+  padding: 3px 8px;
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   color: var(--text-dim);
+  text-align: center;
 }
 
 .settings-nav-item.active .nav-badge {
-  background: rgba(6, 182, 212, 0.25);
+  background: rgba(6, 182, 212, 0.22);
+  border-color: rgba(6, 182, 212, 0.35);
   color: var(--accent-cyan);
+}
+
+.settings-sidebar-footer {
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-status-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.status-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80;
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.25); opacity: 0.65; }
+}
+
+.sidebar-quick-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 0 2px;
+}
+
+.sidebar-quick-meta strong {
+  color: var(--text-muted);
 }
 
 .settings-content {
@@ -2208,13 +2293,18 @@ body {
     flex-direction: row;
     overflow-x: auto;
     padding: 10px;
+    gap: 8px;
   }
-  .settings-sidebar-header {
+  .settings-sidebar-header,
+  .settings-sidebar-footer {
     display: none;
   }
   .settings-nav-item {
     white-space: nowrap;
-    padding: 8px 14px;
+    height: 42px;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    width: auto;
   }
   .settings-form-row {
     grid-template-columns: 1fr;
