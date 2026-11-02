@@ -199,3 +199,132 @@ func TestIngestTorrentsCSVFormat(t *testing.T) {
 	_ = ing
 }
 
+func TestParseByteSize(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{"220.84MB", 231567523},
+		{"220.84 MB", 231567523},
+		{"277.1 MiB", 290560409},
+		{"1.5 GB", 1610612736},
+		{"2 GiB", 2147483648},
+		{"500 KB", 512000},
+		{"512 KiB", 524288},
+		{"1024 B", 1024},
+		{"1.2 TB", 1319413953331},
+	}
+
+	for _, tc := range tests {
+		got := parseByteSize(tc.input)
+		// Allow small margin of delta due to float representation
+		delta := got - tc.expected
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > 1000 {
+			t.Errorf("parseByteSize(%q) = %d, expected ~%d", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestParseRSSItem_TokyoTosho(t *testing.T) {
+	// Tokyo Toshokan puts size and base32 magnet link inside <description>
+	xmlData := `
+	<item>
+		<title>[nam..] レミエール (Zenless Zone Zero).zip</title>
+		<link>https://www.tokyotosho.info/details.php?id=12345</link>
+		<description>Comment: None&lt;br /&gt;Size: 220.84MB&lt;br /&gt;Submitter: Anonymous&lt;br /&gt;&lt;a href="magnet:?xt=urn:btih:3V33QQRKPTJVEPJ6XZV3FCEVHV6NW5HM&amp;dn=test"&gt;magnet&lt;/a&gt;</description>
+	</item>`
+
+	var it rssItem
+	if err := xml.Unmarshal([]byte(xmlData), &it); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	ing := &Ingester{}
+	rec := ing.parseRSSItemToRecord(it, "tokyotosho")
+	if rec == nil {
+		t.Fatalf("expected non-nil record")
+	}
+
+	if rec.Size <= 0 {
+		t.Errorf("expected size > 0 from TokyoTosho description, got %d", rec.Size)
+	}
+	// 220.84 MB is ~231,567,523 bytes
+	if rec.Size < 231000000 || rec.Size > 232000000 {
+		t.Errorf("unexpected size for 220.84MB: %d", rec.Size)
+	}
+
+	// Infohash should be converted from Base32 (3V33QQRKPTJVEPJ6XZV3FCEVHV6NW5HM) to hex
+	if len(rec.InfoHash) != 40 {
+		t.Errorf("expected 40-char hex infohash, got %d chars: %s", len(rec.InfoHash), rec.InfoHash)
+	}
+}
+
+func TestParseRSSItem_Knaben(t *testing.T) {
+	// Knaben format: magnet link in <link>, size in <description>
+	xmlData := `
+	<item>
+		<title>Resident.Evil.2026.2160p.WEB-DL [277.1 MB]</title>
+		<link>magnet:?xt=urn:btih:3529d0309b900ec69b5fe4a29167e9354e880d4e&amp;dn=Resident.Evil</link>
+		<description>Size: 277.1 MB&lt;br /&gt;Category: Movies</description>
+	</item>`
+
+	var it rssItem
+	if err := xml.Unmarshal([]byte(xmlData), &it); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	ing := &Ingester{}
+	rec := ing.parseRSSItemToRecord(it, "knaben")
+	if rec == nil {
+		t.Fatalf("expected non-nil record")
+	}
+
+	if rec.InfoHash != "3529d0309b900ec69b5fe4a29167e9354e880d4e" {
+		t.Errorf("unexpected infohash: %s", rec.InfoHash)
+	}
+
+	if rec.Size <= 0 {
+		t.Errorf("expected size > 0 from Knaben description, got %d", rec.Size)
+	}
+	if rec.Size < 290000000 || rec.Size > 291000000 {
+		t.Errorf("unexpected size for 277.1 MB: %d", rec.Size)
+	}
+}
+
+func TestParseRSSItem_Nyaa(t *testing.T) {
+	// Nyaa format: <nyaa:size>277.1 MiB</nyaa:size>, <nyaa:seeders>45</nyaa:seeders>
+	xmlData := `
+	<item>
+		<title>[SubsPlease] Frieren - 28 (1080p) [1.4 GiB]</title>
+		<link>magnet:?xt=urn:btih:111122223333444455556666777788889999aaaa&amp;dn=Frieren</link>
+		<size>1.4 GiB</size>
+		<seeders>45</seeders>
+		<leechers>5</leechers>
+	</item>`
+
+	var it rssItem
+	if err := xml.Unmarshal([]byte(xmlData), &it); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	ing := &Ingester{}
+	rec := ing.parseRSSItemToRecord(it, "nyaa")
+	if rec == nil {
+		t.Fatalf("expected non-nil record")
+	}
+
+	if rec.Seeders != 45 {
+		t.Errorf("expected 45 seeders, got %d", rec.Seeders)
+	}
+	if rec.Leechers != 5 {
+		t.Errorf("expected 5 leechers, got %d", rec.Leechers)
+	}
+	if rec.Size < 1500000000 || rec.Size > 1510000000 {
+		t.Errorf("unexpected size for 1.4 GiB: %d", rec.Size)
+	}
+}
+
+

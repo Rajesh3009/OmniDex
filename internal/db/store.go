@@ -1033,6 +1033,33 @@ func (s *Store) GetTorrentsToScrape(limit int) ([]string, error) {
 	return hashes, nil
 }
 
+// GetZeroSizeTorrents returns torrent records that have size <= 0 for background metadata resolution
+func (s *Store) GetZeroSizeTorrents(limit int) ([]TorrentRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT info_hash, name, size, file_count, source, seeders, leechers, category, magnet_uri
+		FROM torrents
+		WHERE size <= 0
+		ORDER BY last_seen DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var recs []TorrentRecord
+	for rows.Next() {
+		var r TorrentRecord
+		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI); err == nil {
+			recs = append(recs, r)
+		}
+	}
+	return recs, nil
+}
+
 // GetOldestTorrents retrieves up to limit torrents with the oldest last_seen for dead torrent verification
 func (s *Store) GetOldestTorrents(limit int) ([]TorrentRecord, error) {
 	if limit <= 0 {

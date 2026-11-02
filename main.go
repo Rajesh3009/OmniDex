@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -112,6 +113,17 @@ func main() {
 	}
 	if feedIngester != nil {
 		feedIngester.SetFilterFunc(srv.cfg.MatchesRetentionFilter)
+		if crawler != nil {
+			feedIngester.SetOnZeroSizeTorrent(func(hash, magnet string) {
+				var trackers []string
+				if magnet != "" {
+					if u, err := url.Parse(magnet); err == nil {
+						trackers = u.Query()["tr"]
+					}
+				}
+				crawler.EnqueueMetadataFetch(hash, trackers)
+			})
+		}
 	}
 
 	// Periodic Memory Janitor (runs every 10 min: checkpoints WAL, shrinks cache, frees OS memory)
@@ -557,7 +569,39 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(res)
+	resMap := map[string]any{
+		"success":   res.Success,
+		"info_hash": res.InfoHash,
+		"seeders":   res.Seeders,
+		"leechers":  res.Leechers,
+		"completed": res.Completed,
+	}
+
+	// If this torrent has size == 0, attempt metadata resolution with peers
+	rec, _ := s.store.GetTorrentByHash(hash)
+	if rec != nil {
+		if rec.Size <= 0 && s.crawler != nil {
+			var trackers []string
+			if rec.MagnetURI != "" {
+				if u, err := url.Parse(rec.MagnetURI); err == nil {
+					trackers = u.Query()["tr"]
+				}
+			}
+			resolveCtx, resolveCancel := context.WithTimeout(r.Context(), 4*time.Second)
+			updatedRec, rErr := s.crawler.ResolveMetadataNow(resolveCtx, hash, trackers)
+			resolveCancel()
+			if rErr == nil && updatedRec != nil {
+				rec = updatedRec
+			} else {
+				// Continue in background
+				s.crawler.EnqueueMetadataFetch(hash, trackers)
+			}
+		}
+		resMap["size"] = rec.Size
+		resMap["file_count"] = rec.FileCount
+	}
+
+	_ = json.NewEncoder(w).Encode(resMap)
 }
 
 func (s *Server) handleScraperStatus(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/base32"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,21 +39,26 @@ type FeedStatus struct {
 }
 
 type Ingester struct {
-	store      *db.Store
-	httpClient *http.Client
-	feeds      []config.FeedConfig
-	statusMu   sync.RWMutex
-	statusMap  map[string]*FeedStatus
-	ctx        context.Context
-	cancel     context.CancelFunc
-	filterMu   sync.RWMutex
-	filterFunc func(category, name string) bool
+	store             *db.Store
+	httpClient        *http.Client
+	feeds             []config.FeedConfig
+	statusMu          sync.RWMutex
+	statusMap         map[string]*FeedStatus
+	ctx               context.Context
+	cancel            context.CancelFunc
+	filterMu          sync.RWMutex
+	filterFunc        func(category, name string) bool
+	onZeroSizeTorrent func(hash string, magnet string)
 }
 
 func (ing *Ingester) SetFilterFunc(fn func(category, name string) bool) {
 	ing.filterMu.Lock()
 	defer ing.filterMu.Unlock()
 	ing.filterFunc = fn
+}
+
+func (ing *Ingester) SetOnZeroSizeTorrent(fn func(hash string, magnet string)) {
+	ing.onZeroSizeTorrent = fn
 }
 
 func NewIngester(store *db.Store, initialFeeds []config.FeedConfig) *Ingester {
@@ -345,15 +352,24 @@ type rssChannel struct {
 }
 
 type rssItem struct {
-	Title       string        `xml:"title"`
-	Link        string        `xml:"link"`
-	PubDate     string        `xml:"pubDate"`
-	Description string        `xml:"description"`
-	Category    string        `xml:"category"`
-	Enclosure   rssEnclosure  `xml:"enclosure"`
-	Attrs       []torznabAttr `xml:"attr"`
-	InfoHash    string        `xml:"infoHash"`
-	MagnetURI   string        `xml:"magnetURI"`
+	Title             string        `xml:"title"`
+	Link              string        `xml:"link"`
+	PubDate           string        `xml:"pubDate"`
+	Description       string        `xml:"description"`
+	Category          string        `xml:"category"`
+	Enclosure         rssEnclosure  `xml:"enclosure"`
+	Attrs             []torznabAttr `xml:"attr"`
+	InfoHash          string        `xml:"infoHash"`
+	MagnetURI         string        `xml:"magnetURI"`
+	Size              string        `xml:"size"`
+	ContentLength     string        `xml:"contentLength"`
+	ContentLengthAlt  string        `xml:"content_length"`
+	TorrentContentLen string        `xml:"torrent:contentLength"`
+	Length            string        `xml:"length"`
+	Seeds             string        `xml:"seeds"`
+	Seeders           string        `xml:"seeders"`
+	Peers             string        `xml:"peers"`
+	Leechers          string        `xml:"leechers"`
 }
 
 type rssEnclosure struct {
@@ -365,6 +381,76 @@ type rssEnclosure struct {
 type torznabAttr struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value,attr"`
+}
+
+var (
+	reExplicitSize = regexp.MustCompile(`(?i)(?:file\s*size|size|length)\s*[:=\-]\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTkmgt]?[iI]?B|bytes)\b`)
+	reGenericSize  = regexp.MustCompile(`(?i)(?:\[|\(|\b)([0-9]+(?:\.[0-9]+)?)\s*(TiB|TB|GiB|GB|MiB|MB|KiB|KB)\b`)
+	reMagnetInText = regexp.MustCompile(`magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^\s"'<>]*`)
+)
+
+func parseByteSize(raw string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+
+	// Direct integer parse
+	if val, err := strconv.ParseInt(raw, 10, 64); err == nil && val > 0 {
+		return val
+	}
+
+	re := regexp.MustCompile(`(?i)^([0-9]+(?:\.[0-9]+)?)\s*([KMGTkmgt]?[iI]?B|bytes)?$`)
+	matches := re.FindStringSubmatch(raw)
+	if len(matches) < 2 {
+		return 0
+	}
+
+	num, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || num <= 0 {
+		return 0
+	}
+
+	unit := ""
+	if len(matches) >= 3 {
+		unit = strings.ToUpper(strings.TrimSpace(matches[2]))
+	}
+
+	var mult float64 = 1
+	switch {
+	case strings.HasPrefix(unit, "T"):
+		mult = 1024 * 1024 * 1024 * 1024
+	case strings.HasPrefix(unit, "G"):
+		mult = 1024 * 1024 * 1024
+	case strings.HasPrefix(unit, "M"):
+		mult = 1024 * 1024
+	case strings.HasPrefix(unit, "K"):
+		mult = 1024
+	default:
+		mult = 1
+	}
+
+	return int64(num * mult)
+}
+
+func extractSizeFromText(text string) int64 {
+	if text == "" {
+		return 0
+	}
+
+	if m := reExplicitSize.FindStringSubmatch(text); len(m) >= 3 {
+		if sz := parseByteSize(m[1] + m[2]); sz > 0 {
+			return sz
+		}
+	}
+
+	if m := reGenericSize.FindStringSubmatch(text); len(m) >= 3 {
+		if sz := parseByteSize(m[1] + m[2]); sz > 0 {
+			return sz
+		}
+	}
+
+	return 0
 }
 
 func (ing *Ingester) ingestXMLFeed(data []byte, sourceName string) (int, error) {
@@ -392,6 +478,10 @@ func (ing *Ingester) ingestXMLFeed(data []byte, sourceName string) (int, error) 
 			added++
 		}
 		_ = ing.store.UpsertTorrent(rec)
+
+		if rec.Size <= 0 && ing.onZeroSizeTorrent != nil {
+			ing.onZeroSizeTorrent(rec.InfoHash, rec.MagnetURI)
+		}
 	}
 
 	return added, nil
@@ -425,13 +515,49 @@ func (ing *Ingester) parseRSSItemToRecord(it rssItem, sourceName string) *db.Tor
 				leechers = l
 			}
 		case "size":
-			if sz, err := strconv.ParseInt(attr.Value, 10, 64); err == nil && sz > 0 {
+			if sz := parseByteSize(attr.Value); sz > 0 {
 				size = sz
 			}
 		case "magneturl":
 			if magnet == "" {
 				magnet = attr.Value
 			}
+		}
+	}
+
+	// Fallback size extraction from direct XML tags (e.g. <nyaa:size>, <size>, <torrent:contentLength>, <contentLength>)
+	if size <= 0 {
+		for _, tagVal := range []string{it.Size, it.ContentLength, it.ContentLengthAlt, it.TorrentContentLen, it.Length} {
+			if sz := parseByteSize(tagVal); sz > 0 {
+				size = sz
+				break
+			}
+		}
+	}
+
+	// Fallback size extraction from <description> text (e.g. Tokyo Toshokan "Size: 220.84MB", Knaben "Size: 277.1 MB")
+	if size <= 0 {
+		size = extractSizeFromText(it.Description)
+	}
+
+	// Fallback size extraction from title (e.g. "[1.2 GB]" or "(500 MB)")
+	if size <= 0 {
+		size = extractSizeFromText(title)
+	}
+
+	// Parse seeders and leechers from direct tags if available
+	if seeders <= 1 {
+		if s, err := strconv.Atoi(strings.TrimSpace(it.Seeders)); err == nil && s >= 0 {
+			seeders = s
+		} else if s, err := strconv.Atoi(strings.TrimSpace(it.Seeds)); err == nil && s >= 0 {
+			seeders = s
+		}
+	}
+	if leechers <= 0 {
+		if l, err := strconv.Atoi(strings.TrimSpace(it.Leechers)); err == nil && l >= 0 {
+			leechers = l
+		} else if l, err := strconv.Atoi(strings.TrimSpace(it.Peers)); err == nil && l >= 0 {
+			leechers = l
 		}
 	}
 
@@ -442,12 +568,23 @@ func (ing *Ingester) parseRSSItemToRecord(it rssItem, sourceName string) *db.Tor
 	if magnet == "" && strings.HasPrefix(it.Enclosure.URL, "magnet:") {
 		magnet = it.Enclosure.URL
 	}
+	// Extract magnet link embedded in <description> HTML (Tokyo Toshokan format)
+	if magnet == "" && strings.Contains(it.Description, "magnet:?xt=urn:btih:") {
+		magnet = reMagnetInText.FindString(it.Description)
+	}
 
 	// Extract infohash from magnet if still empty
 	if hash == "" && magnet != "" && strings.Contains(magnet, "btih:") {
 		parts := strings.Split(magnet, "btih:")
 		if len(parts) > 1 {
 			hash = strings.ToLower(strings.Split(parts[1], "&")[0])
+		}
+	}
+
+	// Convert 32-character Base32 infohash to standard 40-character hex if needed
+	if len(hash) == 32 {
+		if raw, err := base32.StdEncoding.DecodeString(strings.ToUpper(hash)); err == nil && len(raw) == 20 {
+			hash = hex.EncodeToString(raw)
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,9 +30,10 @@ import (
 )
 
 type AnnounceJob struct {
-	Hash metainfo.Hash
-	IP   net.IP
-	Port int
+	Hash     metainfo.Hash
+	IP       net.IP
+	Port     int
+	Trackers []string
 }
 
 type CrawlerConfig struct {
@@ -433,6 +435,37 @@ func (c *Crawler) Start() {
 		}
 	}()
 
+	// Periodic zero-size torrent metadata backfill loop
+	go func() {
+		time.Sleep(10 * time.Second)
+		ticker := time.NewTicker(45 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-ticker.C:
+				if c.IsMonthlyLimitExceeded() || len(c.workChan) > 10 {
+					continue
+				}
+				zeros, err := c.store.GetZeroSizeTorrents(15)
+				if err != nil || len(zeros) == 0 {
+					continue
+				}
+				for _, z := range zeros {
+					var trackers []string
+					if z.MagnetURI != "" {
+						if u, err := url.Parse(z.MagnetURI); err == nil {
+							trackers = u.Query()["tr"]
+						}
+					}
+					c.EnqueueMetadataFetch(z.InfoHash, trackers)
+				}
+			}
+		}
+	}()
+
 	for i := 0; i < c.cfg.Workers; i++ {
 		go c.worker(i)
 	}
@@ -465,26 +498,148 @@ func (c *Crawler) Stop() {
 }
 
 func (c *Crawler) enqueue(hash metainfo.Hash, ip net.IP, port int) {
+	c.enqueueWithTrackers(hash, ip, port, nil)
+}
+
+func (c *Crawler) enqueueWithTrackers(hash metainfo.Hash, ip net.IP, port int, trackers []string) {
 	if c.IsMonthlyLimitExceeded() {
 		return
 	}
 
 	hashHex := hex.EncodeToString(hash[:])
-	if c.visited.HasOrAdd(hashHex) {
+
+	// Check if already in DB with known size > 0
+	rec, err := c.store.GetTorrentByHash(hashHex)
+	if err == nil && rec != nil && rec.Size > 0 && rec.FileCount > 0 {
 		return
 	}
 
-	// Check if already in DB
-	exists, err := c.store.Exists(hashHex)
-	if err == nil && exists {
+	if c.visited.HasOrAdd(hashHex) && (rec == nil || rec.Size > 0) {
 		return
 	}
 
 	select {
-	case c.workChan <- AnnounceJob{Hash: hash, IP: ip, Port: port}:
+	case c.workChan <- AnnounceJob{Hash: hash, IP: ip, Port: port, Trackers: trackers}:
 	default:
 		// Drop if queue full to stay lightweight on RAM/CPU
 	}
+}
+
+// EnqueueMetadataFetch queues an infohash to resolve its .torrent metadata via BEP 9
+func (c *Crawler) EnqueueMetadataFetch(hashHex string, trackers []string) {
+	if c.IsMonthlyLimitExceeded() {
+		return
+	}
+	hashBytes, err := hex.DecodeString(strings.TrimSpace(hashHex))
+	if err != nil || len(hashBytes) != 20 {
+		return
+	}
+	var h metainfo.Hash
+	copy(h[:], hashBytes)
+
+	select {
+	case c.workChan <- AnnounceJob{Hash: h, Trackers: trackers}:
+	default:
+	}
+}
+
+// ResolveMetadataNow resolves torrent metadata synchronously with a context timeout
+func (c *Crawler) ResolveMetadataNow(ctx context.Context, hashHex string, extraTrackers []string) (*db.TorrentRecord, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("torrent client not initialized")
+	}
+	hashBytes, err := hex.DecodeString(strings.TrimSpace(hashHex))
+	if err != nil || len(hashBytes) != 20 {
+		return nil, fmt.Errorf("invalid infohash")
+	}
+	var h metainfo.Hash
+	copy(h[:], hashBytes)
+
+	t, _ := c.client.AddTorrentInfoHash(h)
+	if t == nil {
+		return nil, fmt.Errorf("failed to add torrent infohash")
+	}
+	defer t.Drop()
+
+	trackerList := [][]string{
+		{"udp://tracker.opentrackr.org:1337/announce"},
+		{"udp://open.demonii.com:1337/announce"},
+		{"udp://open.stealth.si:80/announce"},
+		{"udp://tracker.torrent.eu.org:451/announce"},
+		{"udp://explodie.org:6969/announce"},
+		{"udp://tracker.moeking.me:6969/announce"},
+	}
+	for _, tr := range extraTrackers {
+		if tr != "" {
+			trackerList = append(trackerList, []string{tr})
+		}
+	}
+	t.AddTrackers(trackerList)
+
+	select {
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.GotInfo():
+	}
+
+	info := t.Info()
+	if info == nil {
+		return nil, fmt.Errorf("metadata nil")
+	}
+
+	var totalSize int64
+	var fileList []string
+	if len(info.Files) > 0 {
+		for _, f := range info.Files {
+			totalSize += f.Length
+			fileList = append(fileList, f.DisplayPath(info))
+		}
+	} else {
+		totalSize = info.TotalLength()
+		fileList = append(fileList, info.Name)
+	}
+
+	if len(fileList) > 50 {
+		fileList = fileList[:50]
+	}
+	filesJSON, _ := json.Marshal(fileList)
+
+	stats := t.Stats()
+	seeders := stats.ConnectedSeeders
+	if seeders <= 0 && stats.ActivePeers > 0 {
+		seeders = 1
+	}
+
+	rec := &db.TorrentRecord{
+		InfoHash:    hashHex,
+		Name:        info.Name,
+		Size:        totalSize,
+		FileCount:   len(info.Files),
+		FilesJSON:   string(filesJSON),
+		PieceLength: info.PieceLength,
+		CreatedTime: time.Now().UTC(),
+		Source:      "dht",
+		Seeders:     seeders,
+		Category:    guessCategory(info.Name, fileList),
+		MagnetURI:   fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hashHex, url.QueryEscape(info.Name)),
+	}
+	if rec.FileCount == 0 {
+		rec.FileCount = 1
+	}
+
+	tags := metadata.ExtractTags(info.Name, fileList)
+	rec.Resolution = tags.Resolution
+	rec.Codec = tags.Codec
+	rec.Quality = tags.Quality
+	rec.Audio = tags.Audio
+	rec.HDR = tags.HDR
+	rec.ReleaseGroup = tags.ReleaseGroup
+
+	_ = c.store.UpsertTorrent(rec)
+	atomic.AddInt64(&c.metrics.MetadataResolved, 1)
+	return c.store.GetTorrentByHash(hashHex)
 }
 
 func (c *Crawler) worker(id int) {
@@ -528,14 +683,20 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	}
 
 	// Add popular high-speed open public trackers to help locate wire peers immediately
-	t.AddTrackers([][]string{
+	trackerList := [][]string{
 		{"udp://tracker.opentrackr.org:1337/announce"},
 		{"udp://open.demonii.com:1337/announce"},
 		{"udp://open.stealth.si:80/announce"},
 		{"udp://tracker.torrent.eu.org:451/announce"},
 		{"udp://explodie.org:6969/announce"},
 		{"udp://tracker.moeking.me:6969/announce"},
-	})
+	}
+	for _, tr := range job.Trackers {
+		if tr != "" {
+			trackerList = append(trackerList, []string{tr})
+		}
+	}
+	t.AddTrackers(trackerList)
 
 	// Wait for metadata (BEP 9 / BEP 10 exchange with wire peers).
 	// Fix #3: 20s timeout instead of 45s. Holding 15 workers × 45s = 675s worth of

@@ -2002,6 +2002,18 @@ async function triggerScrape(infoHash, btn) {
         if (scrapeTip) {
           scrapeTip.textContent = `Scraped just now`;
         }
+
+        // Dynamically update size and file count if resolved from swarm metadata
+        if (data.size > 0) {
+          const sizeCell = row.cells[2];
+          if (sizeCell) {
+            sizeCell.textContent = formatBytes(data.size);
+          }
+          const fileBtn = row.querySelector('.btn-files-badge');
+          if (fileBtn && data.file_count) {
+            fileBtn.innerHTML = `📁 ${data.file_count} ${data.file_count === 1 ? 'file' : 'files'}`;
+          }
+        }
       }
 
       // Also update detail modal if open for this hash
@@ -2015,7 +2027,8 @@ async function triggerScrape(infoHash, btn) {
         if (scEl) scEl.textContent = `🔄 Scraped just now`;
       }
 
-      showToast(`Live swarm updated: ${data.seeders} seeders, ${data.leechers} leechers`, 'success');
+      const sizeNote = data.size > 0 ? ` (Size: ${formatBytes(data.size)})` : '';
+      showToast(`Live swarm updated: ${data.seeders} seeders, ${data.leechers} leechers${sizeNote}`, 'success');
     } else {
       showToast(`Scrape notice: ${data.error || 'Trackers unresponsive'}`, 'warning');
     }
