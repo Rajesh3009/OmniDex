@@ -1,6 +1,6 @@
 # OmniDex — Hybrid DHT Indexer & Torznab Bridge
 
-[![Version](https://img.shields.io/badge/version-1.2.3-blue.svg)](file:///d:/Projects/Web/torrent_indexer/main.go)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](file:///d:/Projects/Web/OmniDex/main.go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](file:///d:/Projects/Web/torrent_indexer/LICENSE)
 
 **OmniDex** is a lightweight, high-performance personal torrent indexer daemon and Web UI running on Go and embedded SQLite (FTS5).
@@ -46,6 +46,14 @@
 9. **Smart Deduplication & Grouping Engine**
    - Automatically cleans release noise (resolution, codec, release group, audio specs, file extensions) to group duplicate and alternative quality releases of the same title together.
    - Interactive UI clustering: neatly collapses multiple releases behind a single primary row with an expandable `X releases` toggle button, keeping search results compact and readable.
+
+10. **Live UDP Tracker Scraper & Swarm Health Engine (BEP 15)**
+   - High-throughput binary UDP tracker client querying open public BitTorrent trackers in real-time.
+   - Multi-hash batching: queries up to 70 torrent hashes in a single UDP packet with adaptive rate-limiting.
+   - Dynamic peer metrics: retrieves live seeders, leechers, and completed download counts.
+   - Safe dead-swarm verification: tracks consecutive zero-seeder / failed scrape attempts to prevent false dead drops before auto-pruning.
+   - Automatic tracker list sync: periodically refreshes live public UDP trackers from curated lists (e.g. `ngosang/trackerslist`) with reliable local fallback.
+   - Interactive Web UI: color-coded seeders/leechers badges, Swarm Health indicator pills (`Healthy`, `Low`, `Dead`), relative scrape timestamps, 1-click on-demand refresh buttons, and dedicated tracker management tab in settings.
 
 ---
 

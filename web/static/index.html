@@ -22,7 +22,7 @@
         <div class="brand-text">
           <div class="brand-title-wrap">
             <h1>OmniDex</h1>
-            <span class="version-badge" id="app-version-badge">v1.2.3</span>
+            <span class="version-badge" id="app-version-badge">v1.3.0</span>
           </div>
           <span>Hybrid DHT & Torznab Bridge</span>
         </div>
@@ -470,6 +470,7 @@
           <button type="button" class="tab-btn active" data-tab="tab-general">General & DHT</button>
           <button type="button" class="tab-btn" data-tab="tab-filter">Retention & Rules</button>
           <button type="button" class="tab-btn" data-tab="tab-feeds">External Feeds (RSS/Torznab)</button>
+          <button type="button" class="tab-btn" data-tab="tab-scraper">Live Tracker Scraper</button>
           <button type="button" class="tab-btn" data-tab="tab-import">Direct Import</button>
           <button type="button" class="tab-btn" data-tab="tab-maintenance">Memory & Cleanup</button>
         </div>
@@ -725,6 +726,74 @@
             </div>
           </div>
 
+          <!-- Tab: Live Tracker Scraper -->
+          <div class="tab-panel" id="tab-scraper">
+            <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 600; font-size: 0.95rem; color: #60a5fa;">📡 Live BEP 15 UDP Tracker Scraper</span>
+                <span id="scraper-live-status-badge" class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80;">Active</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4;">
+                Queries public BitTorrent trackers in real-time using binary UDP packets (BEP 15) to track live Seeders, Leechers, and completed downloads across all torrents.
+              </p>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; font-size: 0.8rem;">
+                <div style="background: var(--bg-surface); padding: 8px 10px; border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 0.72rem;">Total Scraped</div>
+                  <div id="scraper-stat-total" style="font-size: 1.1rem; font-weight: 700; color: var(--text-bright);">0</div>
+                </div>
+                <div style="background: var(--bg-surface); padding: 8px 10px; border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 0.72rem;">Successful</div>
+                  <div id="scraper-stat-success" style="font-size: 1.1rem; font-weight: 700; color: #4ade80;">0</div>
+                </div>
+                <div style="background: var(--bg-surface); padding: 8px 10px; border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 0.72rem;">Active Trackers</div>
+                  <div id="scraper-stat-trackers" style="font-size: 1.1rem; font-weight: 700; color: #60a5fa;">0</div>
+                </div>
+                <div style="background: var(--bg-surface); padding: 8px 10px; border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 0.72rem;">Last Scrape</div>
+                  <div id="scraper-stat-last" style="font-size: 0.85rem; font-weight: 600; color: var(--text-dim); margin-top: 4px;">Never</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <label for="cfg-scraper-enabled" style="margin-bottom: 2px;">Enable Periodic Background Scraper</label>
+                <div style="font-size: 0.78rem; color: var(--text-muted);">Continuously queries stale swarms in round-robin batches</div>
+              </div>
+              <input type="checkbox" id="cfg-scraper-enabled" class="form-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label for="cfg-scraper-interval">Scrape Interval (Minutes)</label>
+                <input type="number" id="cfg-scraper-interval" class="form-input" min="2" max="1440" placeholder="30">
+              </div>
+              <div class="form-group">
+                <label for="cfg-scraper-batch-size">Batch Size per Pass</label>
+                <input type="number" id="cfg-scraper-batch-size" class="form-input" min="5" max="300" placeholder="50">
+              </div>
+            </div>
+
+            <div class="form-group" style="display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <label for="cfg-scraper-autoupdate" style="margin-bottom: 2px;">Auto-Update Public Trackers</label>
+                <div style="font-size: 0.78rem; color: var(--text-muted);">Periodically syncs best live UDP trackers from curated GitHub list</div>
+              </div>
+              <input type="checkbox" id="cfg-scraper-autoupdate" class="form-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-scraper-trackers-url">Tracker List Remote Sync URL</label>
+              <input type="text" id="cfg-scraper-trackers-url" class="form-input" placeholder="https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt">
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-scraper-trackers">Active UDP Trackers (one URL per line)</label>
+              <textarea id="cfg-scraper-trackers" class="form-input" rows="5" placeholder="udp://tracker.opentrackr.org:1337/announce" style="font-family: monospace; font-size: 0.8rem;"></textarea>
+            </div>
+          </div>
+
           <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
             <button type="button" class="btn btn-secondary" data-close="modal-settings">Cancel</button>
             <button type="submit" class="btn btn-primary">Save Settings</button>
@@ -859,6 +928,7 @@
           <span class="meta-pill" id="detail-meta-size">💾 0 B</span>
           <span class="meta-pill meta-seeders" id="detail-meta-seeders">▲ 0 Seeders</span>
           <span class="meta-pill meta-leechers" id="detail-meta-leechers">▼ 0 Leechers</span>
+          <span class="meta-pill" id="detail-meta-scraped" style="cursor: pointer;" title="Last time verified against live UDP trackers">🔄 Scraped: Recently</span>
           <span class="meta-pill" id="detail-meta-category">Category</span>
           <span class="meta-pill" id="detail-meta-source">Source</span>
           <span class="meta-pill" id="detail-meta-date">Date</span>
@@ -895,6 +965,7 @@
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;">
+          <button id="btn-scrape-torrent" class="btn btn-secondary" title="Query live UDP trackers for fresh seeders & leechers">🔄 Refresh Swarm</button>
           <button id="btn-delete-torrent" class="btn"
             style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #fca5a5;">🗑️
             Delete</button>

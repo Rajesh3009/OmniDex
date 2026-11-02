@@ -37,6 +37,8 @@ type TorrentRecord struct {
 	IsSuspicious bool      `json:"is_suspicious"`
 	SpamScore    int       `json:"spam_score"`
 	SpamReasons  string    `json:"spam_reasons,omitempty"`
+	LastScraped  time.Time `json:"last_scraped,omitempty"`
+	ScrapeFails  int       `json:"scrape_fails,omitempty"`
 }
 
 type Stats struct {
@@ -174,6 +176,8 @@ func (s *Store) initSchema() error {
 		"ALTER TABLE torrents ADD COLUMN is_suspicious INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE torrents ADD COLUMN spam_score INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE torrents ADD COLUMN spam_reasons TEXT DEFAULT ''",
+		"ALTER TABLE torrents ADD COLUMN last_scraped DATETIME",
+		"ALTER TABLE torrents ADD COLUMN scrape_fails INTEGER DEFAULT 0",
 	}
 	for _, colSQL := range columns {
 		_, _ = s.db.Exec(colSQL)
@@ -184,6 +188,7 @@ func (s *Store) initSchema() error {
 
 	// Create indices for new columns after ensuring columns exist
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_last_seen ON torrents(last_seen DESC)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_last_scraped ON torrents(last_scraped)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_res ON torrents(resolution)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_codec ON torrents(codec)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_torrents_qual ON torrents(quality)")
@@ -462,8 +467,8 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		args = append(args, filter.MaxSize)
 	}
 
-	selectCols := "info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, ''), resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, '')"
-	selectColsT := "t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri, COALESCE(t.files_json, ''), t.resolution, t.codec, t.quality, t.audio, t.hdr, t.release_group, t.is_suspicious, t.spam_score, COALESCE(t.spam_reasons, '')"
+	selectCols := "info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, ''), resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, ''), COALESCE(last_scraped, ''), COALESCE(scrape_fails, 0)"
+	selectColsT := "t.info_hash, t.name, t.size, t.file_count, t.piece_length, t.created_time, t.source, t.seeders, t.leechers, t.category, t.magnet_uri, COALESCE(t.files_json, ''), t.resolution, t.codec, t.quality, t.audio, t.hdr, t.release_group, t.is_suspicious, t.spam_score, COALESCE(t.spam_reasons, ''), COALESCE(t.last_scraped, ''), COALESCE(t.scrape_fails, 0)"
 
 	if trimmed == "" {
 		whereSQL := ""
@@ -496,12 +501,16 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
+			var lastScrapedStr string
 			var isSuspInt int
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons, &lastScrapedStr, &r.ScrapeFails); err != nil {
 				return nil, 0, err
 			}
 			r.IsSuspicious = isSuspInt == 1
 			r.CreatedTime = parseDBTime(createdStr)
+			if lastScrapedStr != "" {
+				r.LastScraped = parseDBTime(lastScrapedStr)
+			}
 			records = append(records, r)
 		}
 		return records, total, nil
@@ -631,12 +640,16 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		for rows.Next() {
 			var r TorrentRecord
 			var createdStr string
+			var lastScrapedStr string
 			var isSuspInt int
-			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons); err != nil {
+			if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons, &lastScrapedStr, &r.ScrapeFails); err != nil {
 				return nil, 0, err
 			}
 			r.IsSuspicious = isSuspInt == 1
 			r.CreatedTime = parseDBTime(createdStr)
+			if lastScrapedStr != "" {
+				r.LastScraped = parseDBTime(lastScrapedStr)
+			}
 			records = append(records, r)
 		}
 		return records, total, nil
@@ -662,12 +675,16 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 	for rows.Next() {
 		var r TorrentRecord
 		var createdStr string
+		var lastScrapedStr string
 		var isSuspInt int
-		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons); err != nil {
+		if err := rows.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON, &r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons, &lastScrapedStr, &r.ScrapeFails); err != nil {
 			return nil, 0, err
 		}
 		r.IsSuspicious = isSuspInt == 1
 		r.CreatedTime = parseDBTime(createdStr)
+		if lastScrapedStr != "" {
+			r.LastScraped = parseDBTime(lastScrapedStr)
+		}
 		records = append(records, r)
 	}
 
@@ -799,7 +816,8 @@ func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 	cleanHash := strings.ToLower(strings.TrimSpace(hash))
 	row := s.db.QueryRow(`
 		SELECT info_hash, name, size, file_count, piece_length, created_time, source, seeders, leechers, category, magnet_uri, COALESCE(files_json, ''),
-		       resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, '')
+		       resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, ''),
+		       COALESCE(last_scraped, ''), COALESCE(scrape_fails, 0)
 		FROM torrents
 		WHERE LOWER(info_hash) = ?
 		LIMIT 1
@@ -807,24 +825,31 @@ func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 
 	var r TorrentRecord
 	var createdStr string
+	var lastScrapedStr string
 	var isSuspInt int
 	err := row.Scan(&r.InfoHash, &r.Name, &r.Size, &r.FileCount, &r.PieceLength, &createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI, &r.FilesJSON,
-		&r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons)
+		&r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup, &isSuspInt, &r.SpamScore, &r.SpamReasons,
+		&lastScrapedStr, &r.ScrapeFails)
 	if err != nil {
 		return nil, err
 	}
 	r.IsSuspicious = isSuspInt == 1
 	r.CreatedTime = parseDBTime(createdStr)
+	if lastScrapedStr != "" {
+		r.LastScraped = parseDBTime(lastScrapedStr)
+	}
 	return &r, nil
 }
 
 func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 	var r TorrentRecord
 	var createdStr string
+	var lastScrapedStr string
 	var isSuspInt int
 	err := s.db.QueryRow(`
 		SELECT info_hash, name, size, file_count, files_json, piece_length, created_time, source, seeders, leechers, category, magnet_uri,
-		       resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, '')
+		       resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, ''),
+		       COALESCE(last_scraped, ''), COALESCE(scrape_fails, 0)
 		FROM torrents
 		WHERE info_hash = ?
 	`, strings.ToLower(infoHash)).Scan(
@@ -832,12 +857,16 @@ func (s *Store) GetByInfoHash(infoHash string) (*TorrentRecord, error) {
 		&createdStr, &r.Source, &r.Seeders, &r.Leechers, &r.Category, &r.MagnetURI,
 		&r.Resolution, &r.Codec, &r.Quality, &r.Audio, &r.HDR, &r.ReleaseGroup,
 		&isSuspInt, &r.SpamScore, &r.SpamReasons,
+		&lastScrapedStr, &r.ScrapeFails,
 	)
 	if err != nil {
 		return nil, err
 	}
 	r.IsSuspicious = isSuspInt == 1
 	r.CreatedTime = parseDBTime(createdStr)
+	if lastScrapedStr != "" {
+		r.LastScraped = parseDBTime(lastScrapedStr)
+	}
 	return &r, nil
 }
 
@@ -865,10 +894,11 @@ func (s *Store) DeleteTorrent(infoHash string) error {
 }
 
 type PruneOptions struct {
-	MaxSeeders int       `json:"max_seeders"` // e.g. 0
-	OlderThan  time.Time `json:"older_than"`  // e.g. created/last_seen older than X days
-	Source     string    `json:"source"`      // "" for any, or "dht", "prowlarr", "feed"
-	PruneSpam  bool      `json:"prune_spam"`  // also prune is_suspicious == 1
+	MaxSeeders     int       `json:"max_seeders"` // e.g. 0
+	OlderThan      time.Time `json:"older_than"`  // e.g. created/last_seen older than X days
+	Source         string    `json:"source"`      // "" for any, or "dht", "prowlarr", "feed"
+	PruneSpam      bool      `json:"prune_spam"`  // also prune is_suspicious == 1
+	MinScrapeFails int       `json:"min_scrape_fails"` // e.g. 2 for safe multi-scrape verification
 }
 
 // PruneTorrents removes dead torrents according to the specified options
@@ -882,6 +912,11 @@ func (s *Store) PruneTorrents(opts PruneOptions) (int64, error) {
 	} else {
 		where = append(where, "seeders <= ?")
 		args = append(args, opts.MaxSeeders)
+	}
+
+	if opts.MinScrapeFails > 0 {
+		where = append(where, "scrape_fails >= ?")
+		args = append(args, opts.MinScrapeFails)
 	}
 
 	if !opts.OlderThan.IsZero() {
@@ -936,6 +971,66 @@ func (s *Store) UpdatePeerCount(infoHash string, seeders, leechers int) error {
 		WHERE LOWER(info_hash) = ?
 	`, seeders, leechers, cleanHash)
 	return err
+}
+
+// UpdateScrapeResult updates seeders, leechers, last_scraped and tracks consecutive scrape failures
+func (s *Store) UpdateScrapeResult(infoHash string, seeders, leechers int, success bool) error {
+	cleanHash := strings.ToLower(strings.TrimSpace(infoHash))
+	if !success {
+		// Scrape network failure: update last_scraped so it cycles to back of the queue
+		_, err := s.db.Exec(`
+			UPDATE torrents
+			SET last_scraped = CURRENT_TIMESTAMP
+			WHERE LOWER(info_hash) = ?
+		`, cleanHash)
+		return err
+	}
+
+	if seeders > 0 || leechers > 0 {
+		// Valid active swarm reported: reset scrape_fails and update peer counts
+		_, err := s.db.Exec(`
+			UPDATE torrents
+			SET seeders = ?, leechers = ?, last_scraped = CURRENT_TIMESTAMP, last_seen = CURRENT_TIMESTAMP, scrape_fails = 0
+			WHERE LOWER(info_hash) = ?
+		`, seeders, leechers, cleanHash)
+		return err
+	}
+
+	// Tracker affirmatively returned 0 seeders and 0 leechers: increment scrape_fails
+	_, err := s.db.Exec(`
+		UPDATE torrents
+		SET seeders = 0, leechers = 0, last_scraped = CURRENT_TIMESTAMP, scrape_fails = scrape_fails + 1
+		WHERE LOWER(info_hash) = ?
+	`, cleanHash)
+	return err
+}
+
+// GetTorrentsToScrape returns infohashes ordered by oldest last_scraped (unscraped torrents first)
+func (s *Store) GetTorrentsToScrape(limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT info_hash
+		FROM torrents
+		ORDER BY
+			CASE WHEN last_scraped IS NULL OR last_scraped = '' THEN 0 ELSE 1 END ASC,
+			last_scraped ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var hashes []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err == nil && h != "" {
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes, nil
 }
 
 // GetOldestTorrents retrieves up to limit torrents with the oldest last_seen for dead torrent verification

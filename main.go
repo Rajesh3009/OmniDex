@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -21,11 +22,12 @@ import (
 	"local-indexer/internal/feed"
 	"local-indexer/internal/ingester"
 	"local-indexer/internal/prowlarr"
+	"local-indexer/internal/scraper"
 	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
 )
 
-const Version = "1.2.3"
+const Version = "1.3.0"
 
 //go:embed web/static/*
 var staticFS embed.FS
@@ -39,6 +41,7 @@ type Server struct {
 	prowl    *prowlarr.Client
 	feedGen  *feed.Generator
 	ingester *ingester.Ingester
+	scraper  *scraper.Scraper
 }
 
 func main() {
@@ -87,6 +90,11 @@ func main() {
 	feedIngester.Start()
 	defer feedIngester.Stop()
 
+	// Initialize Live UDP Tracker Scraper
+	trackerScraper := scraper.NewScraper(cfg, store)
+	trackerScraper.Start()
+	defer trackerScraper.Stop()
+
 	srv := &Server{
 		cfg:      cfg,
 		cfgPath:  cfgPath,
@@ -96,6 +104,7 @@ func main() {
 		prowl:    prowlClient,
 		feedGen:  feedGen,
 		ingester: feedIngester,
+		scraper:  trackerScraper,
 	}
 
 	if crawler != nil {
@@ -115,22 +124,26 @@ func main() {
 		}
 	}()
 
-	// Periodic Auto-Pruning Janitor (runs every 6 hours if enabled)
+	// Periodic Auto-Pruning Janitor (runs every 6 hours if enabled, with safe 2-fail scrape verification)
 	go func() {
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
 			if srv.cfg.AutoPruneDead && srv.cfg.AutoPruneDays > 0 {
 				cutoff := time.Now().AddDate(0, 0, -srv.cfg.AutoPruneDays)
-				n, err := store.PruneTorrents(db.PruneOptions{MaxSeeders: 0, OlderThan: cutoff})
+				n, err := store.PruneTorrents(db.PruneOptions{MaxSeeders: 0, OlderThan: cutoff, MinScrapeFails: 2})
 				if err == nil && n > 0 {
-					log.Printf("[Auto-Prune] Removed %d dead torrents older than %d days", n, srv.cfg.AutoPruneDays)
+					log.Printf("[Auto-Prune] Removed %d dead torrents older than %d days (verified dead via scraper)", n, srv.cfg.AutoPruneDays)
 				}
 			}
 		}
 	}()
 
 	mux := http.NewServeMux()
+
+	// Tracker Scraper endpoints
+	mux.HandleFunc("/api/v1/torrent/scrape", srv.handleScrapeTorrent)
+	mux.HandleFunc("/api/v1/scraper/status", srv.handleScraperStatus)
 
 	// RSS 2.0 & Atom Feed Endpoints
 	mux.HandleFunc("/api/v1/feed/rss", srv.feedGen.HandleRSS)
@@ -356,9 +369,15 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			AutoPruneDead         *bool    `json:"auto_prune_dead"`
 			AutoPruneDays         *int     `json:"auto_prune_days"`
 			FilterEnabled         *bool    `json:"filter_enabled"`
-			FilterCategoryMode    string   `json:"filter_category_mode"`
-			FilterCategories      []string `json:"filter_categories"`
-			FilterKeywords        []string `json:"filter_keywords"`
+			FilterCategoryMode        string   `json:"filter_category_mode"`
+			FilterCategories          []string `json:"filter_categories"`
+			FilterKeywords            []string `json:"filter_keywords"`
+			ScraperEnabled            *bool    `json:"scraper_enabled"`
+			ScraperIntervalMin        *int     `json:"scraper_interval_min"`
+			ScraperBatchSize          *int     `json:"scraper_batch_size"`
+			ScraperTrackers           []string `json:"scraper_trackers"`
+			ScraperAutoUpdateTrackers *bool    `json:"scraper_auto_update_trackers"`
+			ScraperTrackersURL        string   `json:"scraper_trackers_url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -424,6 +443,28 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			s.cfg.FilterKeywords = update.FilterKeywords
 		}
 
+		if update.ScraperEnabled != nil {
+			s.cfg.ScraperEnabled = *update.ScraperEnabled
+		}
+		if update.ScraperIntervalMin != nil && *update.ScraperIntervalMin > 0 {
+			s.cfg.ScraperIntervalMin = *update.ScraperIntervalMin
+		}
+		if update.ScraperBatchSize != nil && *update.ScraperBatchSize > 0 {
+			s.cfg.ScraperBatchSize = *update.ScraperBatchSize
+		}
+		if update.ScraperTrackers != nil {
+			s.cfg.ScraperTrackers = update.ScraperTrackers
+			if s.scraper != nil {
+				s.scraper.SetTrackers(update.ScraperTrackers)
+			}
+		}
+		if update.ScraperAutoUpdateTrackers != nil {
+			s.cfg.ScraperAutoUpdateTrackers = *update.ScraperAutoUpdateTrackers
+		}
+		if update.ScraperTrackersURL != "" {
+			s.cfg.ScraperTrackersURL = update.ScraperTrackersURL
+		}
+
 		if s.crawler != nil {
 			s.crawler.SetFilterFunc(s.cfg.MatchesRetentionFilter)
 		}
@@ -464,6 +505,61 @@ func (s *Server) handleTorrentRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.handleGetTorrent(w, r)
+}
+
+func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
+	if s.scraper == nil {
+		http.Error(w, "Scraper engine not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
+	}
+	if hash == "" && r.Method == http.MethodPost {
+		var req struct {
+			Hash string `json:"hash"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		hash = strings.TrimSpace(req.Hash)
+	}
+
+	if hash == "" {
+		http.Error(w, "missing hash parameter", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+
+	res, err := s.scraper.ScrapeSingle(ctx, hash)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":   false,
+			"info_hash": hash,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+func (s *Server) handleScraperStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.scraper == nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"running": false,
+			"enabled": false,
+		})
+		return
+	}
+
+	stats := s.scraper.Stats()
+	_ = json.NewEncoder(w).Encode(stats)
 }
 
 func (s *Server) handlePruneTorrents(w http.ResponseWriter, r *http.Request) {

@@ -248,3 +248,79 @@ func TestRetentionFiltering(t *testing.T) {
 	}
 }
 
+func TestScrapeTracking(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "omnidex-scrape-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	rec := &TorrentRecord{
+		InfoHash:    "1111111111111111111111111111111111111111",
+		Name:        "Test Scrape Torrent",
+		Size:        1000,
+		CreatedTime: time.Now(),
+		Seeders:     1,
+		Category:    "Video",
+		Source:      "dht",
+	}
+	if err := store.UpsertTorrent(rec); err != nil {
+		t.Fatalf("UpsertTorrent failed: %v", err)
+	}
+
+	// Should be returned by GetTorrentsToScrape because last_scraped is NULL
+	toScrape, err := store.GetTorrentsToScrape(10)
+	if err != nil || len(toScrape) != 1 || toScrape[0] != rec.InfoHash {
+		t.Fatalf("expected 1 torrent to scrape with hash %s, got %v (err %v)", rec.InfoHash, toScrape, err)
+	}
+
+	// 1. Scrape success with peers
+	if err := store.UpdateScrapeResult(rec.InfoHash, 42, 7, true); err != nil {
+		t.Fatalf("UpdateScrapeResult failed: %v", err)
+	}
+
+	updated, err := store.GetTorrentByHash(rec.InfoHash)
+	if err != nil {
+		t.Fatalf("GetTorrentByHash failed: %v", err)
+	}
+	if updated.Seeders != 42 || updated.Leechers != 7 || updated.ScrapeFails != 0 || updated.LastScraped.IsZero() {
+		t.Fatalf("unexpected fields after successful scrape: %+v", updated)
+	}
+
+	// 2. Scrape with 0 seeders and 0 leechers -> scrape_fails should increment
+	if err := store.UpdateScrapeResult(rec.InfoHash, 0, 0, true); err != nil {
+		t.Fatalf("UpdateScrapeResult 0 peers failed: %v", err)
+	}
+	updated2, _ := store.GetTorrentByHash(rec.InfoHash)
+	if updated2.Seeders != 0 || updated2.ScrapeFails != 1 {
+		t.Fatalf("expected seeders 0 and scrape_fails 1, got %+v", updated2)
+	}
+
+	// 3. Second zero scrape -> scrape_fails becomes 2
+	_ = store.UpdateScrapeResult(rec.InfoHash, 0, 0, true)
+	updated3, _ := store.GetTorrentByHash(rec.InfoHash)
+	if updated3.ScrapeFails != 2 {
+		t.Fatalf("expected scrape_fails 2, got %d", updated3.ScrapeFails)
+	}
+
+	// 4. Test safe pruning with MinScrapeFails
+	// With MinScrapeFails: 3, it should NOT prune
+	pruned, err := store.PruneTorrents(PruneOptions{MaxSeeders: 0, MinScrapeFails: 3})
+	if err != nil || pruned != 0 {
+		t.Fatalf("expected 0 pruned with MinScrapeFails 3, got %d, err %v", pruned, err)
+	}
+
+	// With MinScrapeFails: 2, it SHOULD prune
+	pruned2, err := store.PruneTorrents(PruneOptions{MaxSeeders: 0, MinScrapeFails: 2})
+	if err != nil || pruned2 != 1 {
+		t.Fatalf("expected 1 pruned with MinScrapeFails 2, got %d, err %v", pruned2, err)
+	}
+}
+

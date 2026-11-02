@@ -406,6 +406,8 @@ function initEventListeners() {
         loadFeedsList();
       } else if (targetId === 'tab-filter') {
         updateFilterPreview();
+      } else if (targetId === 'tab-scraper') {
+        loadScraperStats();
       }
     });
   });
@@ -671,7 +673,16 @@ function initEventListeners() {
       filter_enabled: document.getElementById('cfg-filter-enabled')?.checked || false,
       filter_category_mode: document.getElementById('cfg-filter-category-mode')?.value || 'allowlist',
       filter_categories: filterCats,
-      filter_keywords: filterKeywords
+      filter_keywords: filterKeywords,
+      scraper_enabled: document.getElementById('cfg-scraper-enabled')?.checked || false,
+      scraper_interval_min: parseInt(document.getElementById('cfg-scraper-interval')?.value, 10) || 30,
+      scraper_batch_size: parseInt(document.getElementById('cfg-scraper-batch-size')?.value, 10) || 50,
+      scraper_auto_update_trackers: document.getElementById('cfg-scraper-autoupdate')?.checked || false,
+      scraper_trackers_url: document.getElementById('cfg-scraper-trackers-url')?.value?.trim() || '',
+      scraper_trackers: (document.getElementById('cfg-scraper-trackers')?.value || '')
+        .split('\n')
+        .map(t => t.trim())
+        .filter(t => t.startsWith('udp://'))
     };
 
     try {
@@ -1168,6 +1179,20 @@ async function loadConfig() {
       filterKwInput.value = (cfg.filter_keywords || []).join(', ');
     }
     updateFilterPreview();
+
+    const scraperEnabled = document.getElementById('cfg-scraper-enabled');
+    if (scraperEnabled) scraperEnabled.checked = cfg.scraper_enabled !== false;
+    const scraperInterval = document.getElementById('cfg-scraper-interval');
+    if (scraperInterval) scraperInterval.value = cfg.scraper_interval_min || 30;
+    const scraperBatch = document.getElementById('cfg-scraper-batch-size');
+    if (scraperBatch) scraperBatch.value = cfg.scraper_batch_size || 50;
+    const scraperAutoupdate = document.getElementById('cfg-scraper-autoupdate');
+    if (scraperAutoupdate) scraperAutoupdate.checked = cfg.scraper_auto_update_trackers !== false;
+    const scraperUrl = document.getElementById('cfg-scraper-trackers-url');
+    if (scraperUrl) scraperUrl.value = cfg.scraper_trackers_url || '';
+    const scraperTrackers = document.getElementById('cfg-scraper-trackers');
+    if (scraperTrackers && cfg.scraper_trackers) scraperTrackers.value = cfg.scraper_trackers.join('\n');
+    loadScraperStats();
   } catch (e) {
     console.error('Config fetch error:', e);
   }
@@ -1561,6 +1586,15 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     groupBadgeHtml = `<span class="child-indicator">↳</span>`;
   }
 
+  tr.setAttribute('data-hash', item.info_hash);
+  const seeders = item.seeders || 0;
+  const leechers = item.leechers || 0;
+  const seedersClass = seeders === 0 ? 'seeders-badge zero' : 'seeders-badge';
+  const leechersClass = leechers === 0 ? 'leechers-badge zero' : 'leechers-badge';
+  const healthClass = getHealthClass(seeders);
+  const healthLabel = getHealthLabel(seeders);
+  const scrapedText = item.last_scraped ? `Scraped ${formatTimeAgo(item.last_scraped)}` : 'Unscraped';
+
   tr.innerHTML = `
     <td class="torrent-title-cell" data-label="Title">
       <div style="display: flex; align-items: flex-start; gap: 6px;">
@@ -1580,15 +1614,20 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
       </button>
     </td>
     <td class="peers-cell" data-label="Peers">
-      <div class="peer-badges">
-        <span class="seeders-badge" title="${item.seeders || 0} Seeders">▲ ${item.seeders || 0}</span>
-        <span class="leechers-badge" title="${item.leechers || 0} Leechers">▼ ${item.leechers || 0}</span>
+      <div class="peer-badges" style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+        <div style="display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;">
+          <span class="${seedersClass}" title="${seeders} Seeders">▲ ${seeders}</span>
+          <span class="${leechersClass}" title="${leechers} Leechers">▼ ${leechers}</span>
+          <span class="health-badge ${healthClass}" title="Swarm Health: ${healthLabel}">${healthLabel}</span>
+        </div>
+        <div class="scrape-meta-tip" style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">${scrapedText}</div>
       </div>
     </td>
     <td data-label="Source">${sourceBadge}</td>
     <td data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
     <td class="torrent-actions-cell" data-label="Actions" style="text-align: right;">
       <div class="action-btns" style="justify-content: flex-end;">
+        <button class="btn-icon btn-icon-scrape" id="scrape-btn-${item.info_hash}" onclick="event.stopPropagation(); triggerScrape('${item.info_hash}', this)" title="Refresh Live Peers via UDP Trackers">🔄</button>
         <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
         <button class="btn-icon" onclick="showFiles(${index})" title="View Files & Details">📁</button>
         <button class="btn-icon btn-icon-delete" onclick="event.stopPropagation(); deleteTorrentPrompt('${item.info_hash}', '${escapeHtml(item.name).replace(/'/g, "\\'")}')" title="Delete from database">🗑️</button>
@@ -1659,6 +1698,18 @@ async function openTorrentDetails(item) {
 
   const dateEl = document.getElementById('detail-meta-date');
   if (dateEl) dateEl.textContent = `🕒 ${formatDate(item.created_time)}`;
+
+  const scrapedEl = document.getElementById('detail-meta-scraped');
+  if (scrapedEl) {
+    const scText = item.last_scraped ? `🔄 Scraped ${formatTimeAgo(item.last_scraped)}` : '🔄 Scrape Swarm';
+    scrapedEl.textContent = scText;
+    scrapedEl.onclick = () => triggerScrape(item.info_hash, scrapedEl);
+  }
+
+  const btnScrapeTorrent = document.getElementById('btn-scrape-torrent');
+  if (btnScrapeTorrent) {
+    btnScrapeTorrent.onclick = () => triggerScrape(item.info_hash, btnScrapeTorrent);
+  }
 
   // Populate detail tags
   const tagsRow = document.getElementById('detail-tags-row');
@@ -1845,6 +1896,137 @@ function formatDate(dateStr) {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return 'Recently';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function formatTimeAgo(dateInput) {
+  if (!dateInput) return 'Never';
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (!d || isNaN(d.getTime()) || d.getFullYear() <= 1970) return 'Never';
+  const now = new Date();
+  const diffSec = Math.floor((now - d) / 1000);
+  if (diffSec < 15) return 'Just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d ago`;
+}
+
+function getHealthClass(seeders) {
+  const s = parseInt(seeders, 10) || 0;
+  if (s >= 3) return 'health-good';
+  if (s >= 1) return 'health-low';
+  return 'health-dead';
+}
+
+function getHealthLabel(seeders) {
+  const s = parseInt(seeders, 10) || 0;
+  if (s >= 3) return 'Healthy';
+  if (s >= 1) return 'Low';
+  return 'Dead';
+}
+
+async function triggerScrape(infoHash, btn) {
+  if (!infoHash) return;
+  const button = btn || document.getElementById(`scrape-btn-${infoHash}`);
+  if (button) {
+    button.classList.add('spinning');
+  }
+
+  try {
+    const res = await fetch(`/api/v1/torrent/scrape?hash=${encodeURIComponent(infoHash)}`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      // Find row in table and update peer counts and health badge dynamically
+      const row = document.querySelector(`tr[data-hash="${infoHash}"]`);
+      if (row) {
+        const seedersBadge = row.querySelector('.seeders-badge');
+        if (seedersBadge) {
+          seedersBadge.textContent = `▲ ${data.seeders || 0}`;
+          seedersBadge.title = `${data.seeders || 0} Seeders`;
+          if ((data.seeders || 0) === 0) {
+            seedersBadge.classList.add('zero');
+          } else {
+            seedersBadge.classList.remove('zero');
+          }
+        }
+        const leechersBadge = row.querySelector('.leechers-badge');
+        if (leechersBadge) {
+          leechersBadge.textContent = `▼ ${data.leechers || 0}`;
+          leechersBadge.title = `${data.leechers || 0} Leechers`;
+          if ((data.leechers || 0) === 0) {
+            leechersBadge.classList.add('zero');
+          } else {
+            leechersBadge.classList.remove('zero');
+          }
+        }
+        const healthBadge = row.querySelector('.health-badge');
+        if (healthBadge) {
+          healthBadge.className = 'health-badge ' + getHealthClass(data.seeders);
+          healthBadge.textContent = getHealthLabel(data.seeders);
+        }
+        const scrapeTip = row.querySelector('.scrape-meta-tip');
+        if (scrapeTip) {
+          scrapeTip.textContent = `Scraped just now`;
+        }
+      }
+
+      // Also update detail modal if open for this hash
+      const detailHashEl = document.getElementById('detail-hash');
+      if (detailHashEl && detailHashEl.textContent.trim().toLowerCase() === infoHash.toLowerCase()) {
+        const sEl = document.getElementById('detail-meta-seeders');
+        if (sEl) sEl.textContent = `▲ ${data.seeders || 0} Seeders`;
+        const lEl = document.getElementById('detail-meta-leechers');
+        if (lEl) lEl.textContent = `▼ ${data.leechers || 0} Leechers`;
+        const scEl = document.getElementById('detail-meta-scraped');
+        if (scEl) scEl.textContent = `🔄 Scraped just now`;
+      }
+
+      showToast(`Live swarm updated: ${data.seeders} seeders, ${data.leechers} leechers`, 'success');
+    } else {
+      showToast(`Scrape notice: ${data.error || 'Trackers unresponsive'}`, 'warning');
+    }
+  } catch (err) {
+    showToast(`Scrape request failed: ${err.message}`, 'error');
+  } finally {
+    if (button) {
+      button.classList.remove('spinning');
+    }
+  }
+}
+
+async function loadScraperStats() {
+  try {
+    const res = await fetch('/api/v1/scraper/status');
+    if (!res.ok) return;
+    const s = await res.json();
+    const totalEl = document.getElementById('scraper-stat-total');
+    if (totalEl) totalEl.textContent = (s.total_scraped || 0).toLocaleString();
+    const succEl = document.getElementById('scraper-stat-success');
+    if (succEl) succEl.textContent = (s.successful || 0).toLocaleString();
+    const trkEl = document.getElementById('scraper-stat-trackers');
+    if (trkEl) trkEl.textContent = (s.active_trackers || 0);
+    const lastEl = document.getElementById('scraper-stat-last');
+    if (lastEl) {
+      if (s.last_scrape_time && !s.last_scrape_time.startsWith('0001')) {
+        lastEl.textContent = formatTimeAgo(new Date(s.last_scrape_time));
+      } else {
+        lastEl.textContent = 'Never';
+      }
+    }
+    const badge = document.getElementById('scraper-live-status-badge');
+    if (badge) {
+      badge.textContent = s.running ? 'Active' : 'Disabled';
+      badge.style.background = s.running ? 'rgba(34, 197, 94, 0.2)' : 'rgba(148, 163, 184, 0.2)';
+      badge.style.color = s.running ? '#4ade80' : '#94a3b8';
+    }
+  } catch (err) {
+    console.error('Scraper stats error:', err);
+  }
 }
 
 function escapeHtml(str) {

@@ -36,6 +36,12 @@ type Config struct {
 	FilterCategoryMode    string       `json:"filter_category_mode"` // "allowlist" or "blocklist"
 	FilterCategories      []string     `json:"filter_categories"`
 	FilterKeywords        []string     `json:"filter_keywords"`
+	ScraperEnabled        bool         `json:"scraper_enabled"`
+	ScraperIntervalMin    int          `json:"scraper_interval_min"`
+	ScraperBatchSize      int          `json:"scraper_batch_size"`
+	ScraperTrackers       []string     `json:"scraper_trackers"`
+	ScraperAutoUpdateTrackers bool     `json:"scraper_auto_update_trackers"`
+	ScraperTrackersURL    string       `json:"scraper_trackers_url"`
 }
 
 func DefaultConfig() Config {
@@ -76,6 +82,21 @@ func DefaultConfig() Config {
 		FilterCategoryMode:  "allowlist",
 		FilterCategories:    []string{},
 		FilterKeywords:      []string{},
+		ScraperEnabled:      true,
+		ScraperIntervalMin:  30,
+		ScraperBatchSize:    50,
+		ScraperTrackers: []string{
+			"udp://tracker.opentrackr.org:1337/announce",
+			"udp://open.demonii.com:1337/announce",
+			"udp://open.stealth.si:80/announce",
+			"udp://tracker.torrent.eu.org:451/announce",
+			"udp://explodie.org:6969/announce",
+			"udp://tracker.moeking.me:6969/announce",
+			"udp://opentracker.i2p.rocks:6969/announce",
+			"udp://tracker.openbittorrent.com:6969/announce",
+		},
+		ScraperAutoUpdateTrackers: true,
+		ScraperTrackersURL:       "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt",
 	}
 }
 
@@ -92,6 +113,18 @@ func LoadConfig(path string) (Config, error) {
 
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
+	}
+	if len(cfg.ScraperTrackers) == 0 {
+		cfg.ScraperTrackers = DefaultConfig().ScraperTrackers
+	}
+	if cfg.ScraperIntervalMin <= 0 {
+		cfg.ScraperIntervalMin = 30
+	}
+	if cfg.ScraperBatchSize <= 0 {
+		cfg.ScraperBatchSize = 50
+	}
+	if cfg.ScraperTrackersURL == "" {
+		cfg.ScraperTrackersURL = DefaultConfig().ScraperTrackersURL
 	}
 	return cfg, nil
 }
