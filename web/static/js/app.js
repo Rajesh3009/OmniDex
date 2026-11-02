@@ -507,14 +507,33 @@ function initEventListeners() {
   document.getElementById('prune-dead-form')?.addEventListener('submit', handleExecutePrune);
   document.getElementById('btn-execute-prune')?.addEventListener('click', handleExecutePrune);
 
-  // Direct Torrent Import
+  // Direct Torrent Import & CSV Bulk Ingest
+  document.getElementById('btn-upload-csv')?.addEventListener('click', () => {
+    document.getElementById('import-csv-file')?.click();
+  });
+
+  document.getElementById('import-csv-file')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      const inputEl = document.getElementById('import-input');
+      if (inputEl) {
+        inputEl.value = content;
+        showToast(`Loaded ${file.name} (${formatBytes(file.size)})`, 'info');
+      }
+    };
+    reader.readAsText(file);
+  });
+
   document.getElementById('btn-execute-import')?.addEventListener('click', async () => {
     const inputEl = document.getElementById('import-input');
     const nameEl = document.getElementById('import-name');
     const msg = document.getElementById('import-status-msg');
     const inputVal = inputEl?.value.trim();
     if (!inputVal) {
-      showToast('Please enter a magnet link or 40-character infohash', 'warning');
+      showToast('Please enter a magnet link, infohash, or CSV dump', 'warning');
       return;
     }
 
@@ -522,7 +541,7 @@ function initEventListeners() {
       msg.style.display = 'block';
       msg.style.background = 'rgba(6, 182, 212, 0.15)';
       msg.style.color = 'var(--accent-cyan)';
-      msg.textContent = 'Importing torrent...';
+      msg.textContent = 'Importing data...';
     }
 
     try {
@@ -535,8 +554,13 @@ function initEventListeners() {
       if (res.ok) {
         msg.style.background = 'rgba(16, 185, 129, 0.15)';
         msg.style.color = '#34d399';
-        msg.textContent = `✓ Imported: ${data.torrent.name}`;
-        showToast(`Imported: ${data.torrent.name}`, 'success');
+        if (data.mode === 'csv') {
+          msg.textContent = `✓ ${data.message || `Imported ${data.imported} torrents from CSV`}`;
+          showToast(`Bulk CSV imported: ${data.imported} torrents`, 'success');
+        } else {
+          msg.textContent = `✓ Imported: ${data.torrent.name}`;
+          showToast(`Imported: ${data.torrent.name}`, 'success');
+        }
         if (inputEl) inputEl.value = '';
         if (nameEl) nameEl.value = '';
         performSearch(undefined, false);

@@ -848,14 +848,37 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	trimmedInput := strings.TrimSpace(req.Input)
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if this is a CSV bulk import (torrents.csv format)
+	if strings.HasPrefix(strings.ToLower(trimmedInput), "infohash,") || strings.HasPrefix(strings.ToLower(trimmedInput), "info_hash,") || (strings.Contains(trimmedInput, "\n") && strings.Contains(trimmedInput, ",")) {
+		sourceName := req.Name
+		if sourceName == "" {
+			sourceName = "csv-import"
+		}
+		count, err := s.ingester.ImportCSV([]byte(trimmedInput), sourceName)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":   "ok",
+			"mode":     "csv",
+			"imported": count,
+			"message":  fmt.Sprintf("Successfully imported %d torrents from CSV", count),
+		})
+		return
+	}
+
 	rec, err := s.ingester.ImportDirect(req.Input, req.Name)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "torrent": rec})
 }
 

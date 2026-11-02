@@ -564,6 +564,8 @@
                   <option value="rss" selected>RSS 2.0 / Atom</option>
                   <option value="eztv">EZTV API (JSON)</option>
                   <option value="yts">YTS Movie API</option>
+                  <option value="tpb">The Pirate Bay (Apibay JSON)</option>
+                  <option value="torrents-csv">Torrents.csv (API / CSV)</option>
                   <option value="torznab">Torznab Indexer</option>
                 </select>
               </div>
@@ -590,24 +592,31 @@
           </div>
 
           <!-- Tab 3: Direct Import -->
+          <!-- Tab 3: Direct Import & CSV Bulk Ingest -->
           <div class="tab-panel" id="tab-import" style="display: none;">
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 14px;">
-              Quickly index any torrent by pasting a Magnet link or 40-character SHA1 infohash.
+              Quickly index torrents by pasting a Magnet link, a 40-character SHA1 infohash, or raw lines from a <strong>Torrents.csv</strong> dump. You can also upload a <code>.csv</code> file for instant bulk importing.
             </p>
             <div class="form-group">
-              <label for="import-input">Magnet URI or 40-char InfoHash</label>
-              <input type="text" id="import-input" class="form-input"
-                placeholder="magnet:?xt=urn:btih:... or 40-char hex hash">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="import-input" style="margin-bottom: 0;">Magnet URI, InfoHash, or Torrents.csv Dump</label>
+                <div>
+                  <input type="file" id="import-csv-file" accept=".csv,.txt" style="display: none;">
+                  <button type="button" id="btn-upload-csv" class="btn btn-secondary" style="font-size: 0.78rem; padding: 4px 10px;">📁 Load .CSV File</button>
+                </div>
+              </div>
+              <textarea id="import-input" class="form-input" rows="4"
+                placeholder="magnet:?xt=urn:btih:... or 40-char hex hash or paste CSV lines (infohash,name,size_bytes,...)"></textarea>
             </div>
             <div class="form-group">
-              <label for="import-name">Title / Description (optional)</label>
+              <label for="import-name">Source / Title Tag (optional)</label>
               <input type="text" id="import-name" class="form-input"
-                placeholder="Override title if magnet doesn't have dn parameter">
+                placeholder="Custom title (for single magnet) or source label (e.g. torrents-csv)">
             </div>
             <div id="import-status-msg"
               style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.85rem;"></div>
             <button type="button" id="btn-execute-import" class="btn btn-primary" style="width: 100%;">🧲 Import & Index
-              Torrent</button>
+              Torrent(s)</button>
           </div>
 
           <!-- Tab 4: Memory & Cleanup -->

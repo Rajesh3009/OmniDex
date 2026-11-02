@@ -1,8 +1,10 @@
 package ingester
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -285,15 +287,39 @@ func (ing *Ingester) fetchAndIngest(ctx context.Context, f config.FeedConfig) (i
 	trimmed := strings.TrimSpace(string(bodyBytes))
 	isJSON := strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
 
+	// 1. The Pirate Bay (Apibay) JSON
+	if fType == "tpb" || fType == "piratebay" || (isJSON && strings.Contains(trimmed, `"info_hash"`)) {
+		return ing.ingestTPBJSON(bodyBytes, f.Name)
+	}
+
+	// 2. Torrents.csv API JSON
+	if fType == "torrents-csv" || (isJSON && strings.Contains(trimmed, `"torrents"`) && strings.Contains(trimmed, `"infohash"`)) {
+		return ing.ingestTorrentsCSVJSON(bodyBytes, f.Name)
+	}
+
+	// 3. Flat Torrents.csv format (header: infohash,name,size_bytes...)
+	if fType == "csv" || strings.HasPrefix(strings.ToLower(trimmed), "infohash,name") {
+		return ing.ingestTorrentsCSVFile(bodyBytes, f.Name)
+	}
+
+	// 4. EZTV TV Shows API
 	if fType == "eztv" || (isJSON && strings.Contains(trimmed, `"torrents"`)) {
 		return ing.ingestEZTVJSON(bodyBytes, f.Name)
 	}
+
+	// 5. YTS Movie API
 	if fType == "yts" || (isJSON && strings.Contains(trimmed, `"movies"`)) {
 		return ing.ingestYTSJSON(bodyBytes, f.Name)
 	}
 
 	if isJSON {
-		// Attempt EZTV then YTS fallback
+		// Attempt TPB, Torrents.csv, EZTV, then YTS fallbacks
+		if added, err := ing.ingestTPBJSON(bodyBytes, f.Name); err == nil {
+			return added, nil
+		}
+		if added, err := ing.ingestTorrentsCSVJSON(bodyBytes, f.Name); err == nil {
+			return added, nil
+		}
 		if added, err := ing.ingestEZTVJSON(bodyBytes, f.Name); err == nil {
 			return added, nil
 		}
@@ -805,4 +831,381 @@ func containsWord(s, word string) bool {
 
 func isAlphaNum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// -----------------------------------------------------------------------------
+// The Pirate Bay (Apibay) & Torrents.csv Scrapers & Importers
+// -----------------------------------------------------------------------------
+
+type tpbItem struct {
+	ID        any    `json:"id"`
+	Name      string `json:"name"`
+	InfoHash  string `json:"info_hash"`
+	Leechers  any    `json:"leechers"`
+	Seeders   any    `json:"seeders"`
+	NumFiles  any    `json:"num_files"`
+	Size      any    `json:"size"`
+	Username  string `json:"username"`
+	Added     any    `json:"added"`
+	Category  any    `json:"category"`
+	IMDb      string `json:"imdb"`
+}
+
+func (ing *Ingester) ingestTPBJSON(data []byte, sourceName string) (int, error) {
+	var items []tpbItem
+	if err := json.Unmarshal(data, &items); err != nil {
+		return 0, err
+	}
+
+	added := 0
+	for _, it := range items {
+		hash := strings.ToLower(strings.TrimSpace(it.InfoHash))
+		if len(hash) != 40 {
+			continue
+		}
+		title := strings.TrimSpace(it.Name)
+		if title == "" {
+			continue
+		}
+
+		size := toInt64(it.Size)
+		seeders := int(toInt64(it.Seeders))
+		leechers := int(toInt64(it.Leechers))
+		fileCount := int(toInt64(it.NumFiles))
+		if fileCount <= 0 {
+			fileCount = 1
+		}
+
+		addedUnix := toInt64(it.Added)
+		created := time.Now().UTC()
+		if addedUnix > 0 {
+			created = time.Unix(addedUnix, 0).UTC()
+		}
+
+		catID := int(toInt64(it.Category))
+		category := mapTPBCategory(catID, title)
+
+		magnet := fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://open.demonii.com:1337/announce&tr=udp://open.stealth.si:80/announce",
+			hash, url.QueryEscape(title))
+
+		tags := metadata.ExtractTags(title, nil)
+		spamVerdict := spamfilter.Inspect(title, nil, category, size)
+		filesJSON, _ := json.Marshal([]string{title})
+
+		source := "tpb"
+		if sourceName != "" {
+			source = strings.ToLower(strings.ReplaceAll(sourceName, " ", "-"))
+		}
+
+		rec := &db.TorrentRecord{
+			InfoHash:     hash,
+			Name:         title,
+			Size:         size,
+			FileCount:    fileCount,
+			FilesJSON:    string(filesJSON),
+			CreatedTime:  created,
+			LastSeen:     time.Now().UTC(),
+			Source:       source,
+			Seeders:      seeders,
+			Leechers:     leechers,
+			Category:     category,
+			MagnetURI:    magnet,
+			Resolution:   tags.Resolution,
+			Codec:        tags.Codec,
+			Quality:      tags.Quality,
+			HDR:          tags.HDR,
+			ReleaseGroup: tags.ReleaseGroup,
+			IsSuspicious: spamVerdict.IsSuspicious,
+			SpamScore:    spamVerdict.Score,
+			SpamReasons:  strings.Join(spamVerdict.Reasons, " • "),
+		}
+
+		ing.filterMu.RLock()
+		filter := ing.filterFunc
+		ing.filterMu.RUnlock()
+		if filter != nil && !filter(rec.Category, rec.Name) {
+			continue
+		}
+
+		exists, _ := ing.store.Exists(hash)
+		if !exists {
+			added++
+		}
+		_ = ing.store.UpsertTorrent(rec)
+	}
+
+	return added, nil
+}
+
+func mapTPBCategory(catID int, title string) string {
+	switch {
+	case catID >= 100 && catID < 200:
+		return "Audio"
+	case catID >= 200 && catID < 300:
+		return "Video"
+	case catID >= 300 && catID < 400:
+		return "Software"
+	case catID >= 400 && catID < 500:
+		return "Games"
+	case catID >= 500 && catID < 600:
+		return "Other" // Adult category in TPB
+	default:
+		return guessCategory(title, "")
+	}
+}
+
+type torrentsCSVAPIResponse struct {
+	Torrents []struct {
+		Infohash    string `json:"infohash"`
+		Name        string `json:"name"`
+		SizeBytes   int64  `json:"size_bytes"`
+		CreatedUnix int64  `json:"created_unix"`
+		Seeders     int    `json:"seeders"`
+		Leechers    int    `json:"leechers"`
+		Completed   int    `json:"completed"`
+		ScrapedDate int64  `json:"scraped_date"`
+		ID          any    `json:"id"`
+	} `json:"torrents"`
+	Next any `json:"next"`
+}
+
+func (ing *Ingester) ingestTorrentsCSVJSON(data []byte, sourceName string) (int, error) {
+	var resp torrentsCSVAPIResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return 0, err
+	}
+
+	added := 0
+	for _, t := range resp.Torrents {
+		hash := strings.ToLower(strings.TrimSpace(t.Infohash))
+		if len(hash) != 40 {
+			continue
+		}
+		title := strings.TrimSpace(t.Name)
+		if title == "" {
+			continue
+		}
+
+		created := time.Now().UTC()
+		if t.CreatedUnix > 0 {
+			created = time.Unix(t.CreatedUnix, 0).UTC()
+		}
+
+		category := guessCategory(title, "")
+		magnet := fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://open.demonii.com:1337/announce",
+			hash, url.QueryEscape(title))
+
+		tags := metadata.ExtractTags(title, nil)
+		spamVerdict := spamfilter.Inspect(title, nil, category, t.SizeBytes)
+		filesJSON, _ := json.Marshal([]string{title})
+
+		source := "torrents-csv"
+		if sourceName != "" {
+			source = strings.ToLower(strings.ReplaceAll(sourceName, " ", "-"))
+		}
+
+		rec := &db.TorrentRecord{
+			InfoHash:     hash,
+			Name:         title,
+			Size:         t.SizeBytes,
+			FileCount:    1,
+			FilesJSON:    string(filesJSON),
+			CreatedTime:  created,
+			LastSeen:     time.Now().UTC(),
+			Source:       source,
+			Seeders:      t.Seeders,
+			Leechers:     t.Leechers,
+			Category:     category,
+			MagnetURI:    magnet,
+			Resolution:   tags.Resolution,
+			Codec:        tags.Codec,
+			Quality:      tags.Quality,
+			HDR:          tags.HDR,
+			ReleaseGroup: tags.ReleaseGroup,
+			IsSuspicious: spamVerdict.IsSuspicious,
+			SpamScore:    spamVerdict.Score,
+			SpamReasons:  strings.Join(spamVerdict.Reasons, " • "),
+		}
+
+		ing.filterMu.RLock()
+		filter := ing.filterFunc
+		ing.filterMu.RUnlock()
+		if filter != nil && !filter(rec.Category, rec.Name) {
+			continue
+		}
+
+		exists, _ := ing.store.Exists(hash)
+		if !exists {
+			added++
+		}
+		_ = ing.store.UpsertTorrent(rec)
+	}
+
+	return added, nil
+}
+
+// IngestTorrentsCSVFile parses flat CSV data formatted like torrents.csv
+func (ing *Ingester) IngestTorrentsCSVFile(data []byte, sourceName string) (int, error) {
+	return ing.ingestTorrentsCSVFile(data, sourceName)
+}
+
+func (ing *Ingester) ingestTorrentsCSVFile(data []byte, sourceName string) (int, error) {
+	reader := csv.NewReader(bytes.NewReader(data))
+	reader.LazyQuotes = true
+	reader.FieldsPerRecord = -1
+
+	header, err := reader.Read()
+	if err != nil {
+		return 0, fmt.Errorf("read CSV header: %w", err)
+	}
+
+	colMap := make(map[string]int)
+	for i, col := range header {
+		colMap[strings.ToLower(strings.TrimSpace(col))] = i
+	}
+
+	hashIdx, hasHash := colMap["infohash"]
+	if !hasHash {
+		hashIdx, hasHash = colMap["info_hash"]
+	}
+	nameIdx, hasName := colMap["name"]
+	sizeIdx, hasSize := colMap["size_bytes"]
+	if !hasSize {
+		sizeIdx, hasSize = colMap["size"]
+	}
+	createdIdx, hasCreated := colMap["created_unix"]
+	seedersIdx, hasSeeders := colMap["seeders"]
+	leechersIdx, hasLeechers := colMap["leechers"]
+
+	if !hasHash || !hasName {
+		return 0, fmt.Errorf("invalid CSV header: missing 'infohash' or 'name' column")
+	}
+
+	source := "torrents-csv"
+	if sourceName != "" {
+		source = strings.ToLower(strings.ReplaceAll(sourceName, " ", "-"))
+	}
+
+	added := 0
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+
+		if hashIdx >= len(record) || nameIdx >= len(record) {
+			continue
+		}
+
+		hash := strings.ToLower(strings.TrimSpace(record[hashIdx]))
+		if len(hash) != 40 {
+			continue
+		}
+
+		name := strings.TrimSpace(record[nameIdx])
+		if name == "" {
+			continue
+		}
+
+		var size int64
+		if hasSize && sizeIdx < len(record) {
+			size, _ = strconv.ParseInt(strings.TrimSpace(record[sizeIdx]), 10, 64)
+		}
+
+		created := time.Now().UTC()
+		if hasCreated && createdIdx < len(record) {
+			if u, err := strconv.ParseInt(strings.TrimSpace(record[createdIdx]), 10, 64); err == nil && u > 0 {
+				created = time.Unix(u, 0).UTC()
+			}
+		}
+
+		seeders := 0
+		if hasSeeders && seedersIdx < len(record) {
+			s, _ := strconv.Atoi(strings.TrimSpace(record[seedersIdx]))
+			if s > 0 {
+				seeders = s
+			}
+		}
+
+		leechers := 0
+		if hasLeechers && leechersIdx < len(record) {
+			l, _ := strconv.Atoi(strings.TrimSpace(record[leechersIdx]))
+			if l > 0 {
+				leechers = l
+			}
+		}
+
+		category := guessCategory(name, "")
+		magnet := fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s&tr=udp://tracker.opentrackr.org:1337/announce",
+			hash, url.QueryEscape(name))
+
+		tags := metadata.ExtractTags(name, nil)
+		spamVerdict := spamfilter.Inspect(name, nil, category, size)
+		filesJSON, _ := json.Marshal([]string{name})
+
+		rec := &db.TorrentRecord{
+			InfoHash:     hash,
+			Name:         name,
+			Size:         size,
+			FileCount:    1,
+			FilesJSON:    string(filesJSON),
+			CreatedTime:  created,
+			LastSeen:     time.Now().UTC(),
+			Source:       source,
+			Seeders:      seeders,
+			Leechers:     leechers,
+			Category:     category,
+			MagnetURI:    magnet,
+			Resolution:   tags.Resolution,
+			Codec:        tags.Codec,
+			Quality:      tags.Quality,
+			HDR:          tags.HDR,
+			ReleaseGroup: tags.ReleaseGroup,
+			IsSuspicious: spamVerdict.IsSuspicious,
+			SpamScore:    spamVerdict.Score,
+			SpamReasons:  strings.Join(spamVerdict.Reasons, " • "),
+		}
+
+		ing.filterMu.RLock()
+		filter := ing.filterFunc
+		ing.filterMu.RUnlock()
+		if filter != nil && !filter(rec.Category, rec.Name) {
+			continue
+		}
+
+		exists, _ := ing.store.Exists(hash)
+		if !exists {
+			added++
+		}
+		_ = ing.store.UpsertTorrent(rec)
+	}
+
+	return added, nil
+}
+
+// ImportCSV parses and batch-imports a CSV dump formatted in torrents.csv style
+func (ing *Ingester) ImportCSV(data []byte, sourceName string) (int, error) {
+	return ing.ingestTorrentsCSVFile(data, sourceName)
+}
+
+func toInt64(val any) int64 {
+	switch v := val.(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return n
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	default:
+		return 0
+	}
 }

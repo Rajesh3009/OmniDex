@@ -1,6 +1,8 @@
 package ingester
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"testing"
@@ -106,5 +108,94 @@ func TestIngestEZTVJSON(t *testing.T) {
 	if err != nil || size != 1048576000 {
 		t.Errorf("expected size 1048576000, got %d (err: %v)", size, err)
 	}
+}
+
+func TestIngestTPBJSON(t *testing.T) {
+	sampleTPB := []byte(`[
+		{
+			"id": "84919139",
+			"info_hash": "157452D0FC95D354035EFC736AB74AD0230B4B6F",
+			"category": "208",
+			"name": "Tracker.2024.S04E05.1080p.x265-ELiTE",
+			"status": "vip",
+			"num_files": "6",
+			"size": "899604077",
+			"seeders": "42",
+			"leechers": "7",
+			"added": "1793603871"
+		}
+	]`)
+
+	var items []tpbItem
+	if err := json.Unmarshal(sampleTPB, &items); err != nil {
+		t.Fatalf("Unmarshal TPB JSON failed: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	it := items[0]
+	if it.InfoHash != "157452D0FC95D354035EFC736AB74AD0230B4B6F" {
+		t.Errorf("unexpected infohash: %s", it.InfoHash)
+	}
+	if toInt64(it.Seeders) != 42 {
+		t.Errorf("expected 42 seeders, got %d", toInt64(it.Seeders))
+	}
+	if toInt64(it.Leechers) != 7 {
+		t.Errorf("expected 7 leechers, got %d", toInt64(it.Leechers))
+	}
+	if toInt64(it.Size) != 899604077 {
+		t.Errorf("expected size 899604077, got %d", toInt64(it.Size))
+	}
+
+	cat := mapTPBCategory(int(toInt64(it.Category)), it.Name)
+	if cat != "Video" {
+		t.Errorf("expected Category Video for cat 208, got %s", cat)
+	}
+}
+
+func TestIngestTorrentsCSVFormat(t *testing.T) {
+	csvData := []byte("infohash,name,size_bytes,created_unix,seeders,leechers,completed,scraped_date,published\n" +
+		"7ede2d8b2fb9bba3ef44993303a9ed9b2eb3666a,\"Adobe Illustrator 2024 v33.3 + Crack (macOS)\",1824730597,1723704841,87020,57886,70,1792941163,1697467411\n" +
+		"00001f7eddd01e6f2d9d8c28695f3770bdcddfee,\"[SubsPlease] Lv1 Maou to One Room Yuusha - 06 (1080p)\",420876353,1693929977,15,2,8,1792926928,1693929982\n")
+
+	ing := &Ingester{}
+	// Test header parsing logic
+	reader := csv.NewReader(bytes.NewReader(csvData))
+	header, err := reader.Read()
+	if err != nil {
+		t.Fatalf("failed to read CSV header: %v", err)
+	}
+
+	colMap := make(map[string]int)
+	for i, col := range header {
+		colMap[col] = i
+	}
+
+	if _, ok := colMap["infohash"]; !ok {
+		t.Errorf("missing infohash in colMap")
+	}
+	if _, ok := colMap["name"]; !ok {
+		t.Errorf("missing name in colMap")
+	}
+
+	r1, err := reader.Read()
+	if err != nil {
+		t.Fatalf("failed to read record 1: %v", err)
+	}
+
+	if r1[colMap["infohash"]] != "7ede2d8b2fb9bba3ef44993303a9ed9b2eb3666a" {
+		t.Errorf("unexpected infohash: %s", r1[colMap["infohash"]])
+	}
+	if r1[colMap["name"]] != "Adobe Illustrator 2024 v33.3 + Crack (macOS)" {
+		t.Errorf("unexpected name: %s", r1[colMap["name"]])
+	}
+
+	cat := guessCategory(r1[colMap["name"]], "")
+	if cat != "Software" {
+		t.Errorf("expected Software category, got %s", cat)
+	}
+	_ = ing
 }
 
