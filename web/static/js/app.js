@@ -1625,7 +1625,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   const scrapedText = item.last_scraped ? `Scraped ${formatTimeAgo(item.last_scraped)}` : 'Unscraped';
 
   tr.innerHTML = `
-    <td class="torrent-title-cell" data-label="Title">
+    <td class="col-title torrent-title-cell" data-label="Title">
       <div style="display: flex; align-items: flex-start; gap: 6px;">
         ${groupBadgeHtml}
         <div style="flex: 1; min-width: 0;">
@@ -1635,14 +1635,14 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
         </div>
       </div>
     </td>
-    <td data-label="Category">${catBadge}</td>
-    <td data-label="Size">${formatBytes(item.size)}</td>
-    <td data-label="Files">
+    <td class="col-category" data-label="Category">${catBadge}</td>
+    <td class="col-size" data-label="Size">${formatBytes(item.size)}</td>
+    <td class="col-files" data-label="Files">
       <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
         📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
       </button>
     </td>
-    <td class="peers-cell" data-label="Peers">
+    <td class="col-peers peers-cell" data-label="Peers">
       <div class="peer-badges" style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
         <div style="display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;">
           <span class="${seedersClass}" title="${seeders} Seeders">▲ ${seeders}</span>
@@ -1652,9 +1652,9 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
         <div class="scrape-meta-tip" style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">${scrapedText}</div>
       </div>
     </td>
-    <td data-label="Source">${sourceBadge}</td>
-    <td data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
-    <td class="torrent-actions-cell" data-label="Actions" style="text-align: right;">
+    <td class="col-source" data-label="Source">${sourceBadge}</td>
+    <td class="col-date" data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
+    <td class="col-actions torrent-actions-cell" data-label="Actions" style="text-align: right;">
       <div class="action-btns" style="justify-content: flex-end;">
         <button class="btn-icon btn-icon-scrape" id="scrape-btn-${item.info_hash}" onclick="event.stopPropagation(); triggerScrape('${item.info_hash}', this)" title="Refresh Live Peers via UDP Trackers">🔄</button>
         <a href="${magnet}" class="btn-icon" title="Magnet Download">🧲</a>
@@ -2005,7 +2005,7 @@ async function triggerScrape(infoHash, btn) {
 
         // Dynamically update size and file count if resolved from swarm metadata
         if (data.size > 0) {
-          const sizeCell = row.cells[2];
+          const sizeCell = row.querySelector('.col-size') || row.cells[2];
           if (sizeCell) {
             sizeCell.textContent = formatBytes(data.size);
           }

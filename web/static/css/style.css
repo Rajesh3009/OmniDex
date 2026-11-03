@@ -183,15 +183,10 @@ body {
   }
 }
 
-@media (max-width: 1200px) {
-  .stats-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
   }
 }
 
@@ -605,10 +600,32 @@ body {
 .torrent-table-wrap {
   background: var(--bg-card);
   backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow-sm);
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.torrent-table-wrap::-webkit-scrollbar {
+  height: 6px;
+}
+
+.torrent-table-wrap::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+}
+
+.torrent-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.torrent-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-cyan);
 }
 
 .torrent-table {
@@ -618,20 +635,21 @@ body {
 }
 
 .torrent-table th {
-  background: rgba(0, 0, 0, 0.3);
-  padding: 14px 18px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
   font-weight: 600;
   border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
 }
 
 .torrent-table td {
-  padding: 14px 18px;
+  padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   vertical-align: middle;
 }
 
@@ -641,6 +659,64 @@ body {
 
 .torrent-row:hover {
   background: var(--bg-card-hover);
+}
+
+/* Explicit table column styles */
+.col-title {
+  min-width: 200px;
+  max-width: 420px;
+}
+
+.col-category {
+  white-space: nowrap;
+}
+
+.col-size {
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.col-files {
+  white-space: nowrap;
+}
+
+.col-peers {
+  white-space: nowrap;
+  min-width: 130px;
+}
+
+.col-source {
+  white-space: nowrap;
+}
+
+.col-date {
+  white-space: nowrap;
+}
+
+.col-actions {
+  white-space: nowrap;
+  text-align: right;
+  min-width: 145px;
+}
+
+/* Sticky Actions Column for desktop & vertical/tablet table view */
+.torrent-table th.col-actions,
+.torrent-table td.col-actions {
+  position: sticky;
+  right: 0;
+  background: #0d1527;
+  z-index: 2;
+  box-shadow: -6px 0 12px -4px rgba(0, 0, 0, 0.5);
+}
+
+.torrent-table th.col-actions {
+  background: #090e1b;
+  z-index: 3;
+}
+
+.torrent-row:hover td.col-actions {
+  background: #141f36;
 }
 
 .torrent-title-cell {
@@ -833,14 +909,15 @@ body {
 
 .action-btns {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .btn-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-muted);
@@ -849,7 +926,9 @@ body {
   justify-content: center;
   cursor: pointer;
   text-decoration: none;
+  font-size: 0.85rem;
   transition: var(--transition);
+  flex-shrink: 0;
 }
 
 .btn-icon:hover {
@@ -1538,8 +1617,64 @@ body {
   }
 }
 
+/* ==========================================================================
+   Vertical Displays, Portrait Mode & Snapped Windows (769px to 1200px)
+   ========================================================================== */
+@media (max-width: 1200px) {
+  .container {
+    padding: 16px 14px;
+    max-width: 100%;
+  }
+
+  .torrent-table th,
+  .torrent-table td {
+    padding: 10px 10px;
+  }
+
+  .col-title {
+    max-width: 320px;
+  }
+
+  .btn-files-badge {
+    padding: 2.5px 6px;
+    font-size: 0.74rem;
+  }
+
+  .peer-badges {
+    gap: 3px;
+  }
+
+  .seeders-badge, .leechers-badge, .health-badge {
+    padding: 1.5px 5px;
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 1000px) {
+  .col-date {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .col-source {
+    display: none;
+  }
+}
+
 /* Responsive Torrent Cards on Screens <= 768px */
 @media (max-width: 768px) {
+  .col-date,
+  .col-source {
+    display: flex !important; /* Restore for mobile card view rows */
+  }
+
+  .torrent-table th.col-actions,
+  .torrent-table td.col-actions {
+    position: static !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
   .torrent-table-wrap {
     background: transparent;
     border: none;
