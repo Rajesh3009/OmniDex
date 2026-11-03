@@ -90,15 +90,20 @@ type DHTGraphData struct {
 
 type boundedCache struct {
 	mu      sync.Mutex
-	items   map[string]time.Time
-	order   []string
+	items   map[string]struct{}
+	ring    []string
+	head    int
+	size    int
 	maxSize int
 }
 
 func newBoundedCache(maxSize int) *boundedCache {
+	if maxSize <= 0 {
+		maxSize = 15000
+	}
 	return &boundedCache{
-		items:   make(map[string]time.Time, maxSize),
-		order:   make([]string, 0, maxSize),
+		items:   make(map[string]struct{}, maxSize),
+		ring:    make([]string, maxSize),
 		maxSize: maxSize,
 	}
 }
@@ -111,14 +116,18 @@ func (b *boundedCache) HasOrAdd(key string) bool {
 		return true
 	}
 
-	if len(b.order) >= b.maxSize {
-		oldest := b.order[0]
-		b.order = b.order[1:]
+	if b.size < b.maxSize {
+		b.ring[b.head] = key
+		b.head = (b.head + 1) % b.maxSize
+		b.size++
+	} else {
+		oldest := b.ring[b.head]
 		delete(b.items, oldest)
+		b.ring[b.head] = key
+		b.head = (b.head + 1) % b.maxSize
 	}
 
-	b.items[key] = time.Now()
-	b.order = append(b.order, key)
+	b.items[key] = struct{}{}
 	return false
 }
 
@@ -134,9 +143,14 @@ type Crawler struct {
 	metrics Metrics
 	ctx     context.Context
 	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 
 	downloadLimiter *rate.Limiter
 	uploadLimiter   *rate.Limiter
+
+	querySem             chan struct{}
+	monthlyLimitExceeded atomic.Bool
+	isBootstrapping      atomic.Bool
 
 	bwMu              sync.Mutex
 	lastStatsSample   time.Time
@@ -202,21 +216,20 @@ func (c *Crawler) SetRateLimits(maxDownloadBytesPerSec, maxUploadBytesPerSec int
 
 func (c *Crawler) SetMonthlyLimit(limitBytes int64) {
 	c.bwMu.Lock()
-	defer c.bwMu.Unlock()
 	c.cfg.MonthlyDataLimitBytes = limitBytes
+	c.bwMu.Unlock()
+
+	if limitBytes <= 0 || c.store == nil {
+		c.monthlyLimitExceeded.Store(false)
+		return
+	}
+	if bs, err := c.store.GetBandwidthStats(); err == nil {
+		c.monthlyLimitExceeded.Store((bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes) >= limitBytes)
+	}
 }
 
 func (c *Crawler) IsMonthlyLimitExceeded() bool {
-	c.bwMu.Lock()
-	defer c.bwMu.Unlock()
-	if c.cfg.MonthlyDataLimitBytes <= 0 || c.store == nil {
-		return false
-	}
-	bs, err := c.store.GetBandwidthStats()
-	if err != nil {
-		return false
-	}
-	return (bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes) >= c.cfg.MonthlyDataLimitBytes
+	return c.monthlyLimitExceeded.Load()
 }
 
 func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
@@ -253,9 +266,18 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 		cancel:          cancel,
 		downloadLimiter: dlLimiter,
 		uploadLimiter:   ulLimiter,
+		querySem:        make(chan struct{}, 20),
 		lastStatsSample: time.Now(),
 		totalDownloaded: initDownloaded,
 		totalUploaded:   initUploaded,
+	}
+
+	if store != nil && cfg.MonthlyDataLimitBytes > 0 {
+		if bs, err := store.GetBandwidthStats(); err == nil {
+			if (bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes) >= cfg.MonthlyDataLimitBytes {
+				c.monthlyLimitExceeded.Store(true)
+			}
+		}
 	}
 
 	// Setup lightweight anacrolix torrent client for wire metadata resolution
@@ -332,22 +354,33 @@ func (c *Crawler) Start() {
 	log.Printf("[DHT Crawler] Started DHT passive listener on %v with %d workers", c.dhtServer.Addr(), c.cfg.Workers)
 
 	// Bootstrap to insert our node into global DHT routing tables
-	go func() {
-		log.Println("[DHT Crawler] Bootstrapping DHT node with global router nodes...")
-		stats, err := c.dhtServer.Bootstrap()
-		if err != nil {
-			log.Printf("[DHT Crawler] Bootstrap note: %v", err)
-		} else {
-			log.Printf("[DHT Crawler] Bootstrap complete. Responses received: %d", stats.NumResponses)
-		}
-	}()
+	if c.isBootstrapping.CompareAndSwap(false, true) {
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			defer c.isBootstrapping.Store(false)
+			log.Println("[DHT Crawler] Bootstrapping DHT node with global router nodes...")
+			stats, err := c.dhtServer.Bootstrap()
+			if err != nil {
+				log.Printf("[DHT Crawler] Bootstrap note: %v", err)
+			} else {
+				log.Printf("[DHT Crawler] Bootstrap complete. Responses received: %d", stats.NumResponses)
+			}
+		}()
+	}
 
 	// Active DHT Infohash Discovery Loop:
 	// Uses BEP 51 (sample_infohashes) + find_node random walk traversal
+	c.wg.Add(1)
 	go func() {
-		time.Sleep(3 * time.Second)
+		defer c.wg.Done()
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
 		ticker := time.NewTicker(2 * time.Second)
-		rebootstrapTicker := time.NewTicker(10 * time.Minute) // Fix #1: periodic re-bootstrap to refresh stale routing table
+		rebootstrapTicker := time.NewTicker(10 * time.Minute) // periodic re-bootstrap to refresh stale routing table
 		defer ticker.Stop()
 		defer rebootstrapTicker.Stop()
 
@@ -358,29 +391,42 @@ func (c *Crawler) Start() {
 			case <-rebootstrapTicker.C:
 				// Periodically re-insert ourselves into the DHT regardless of node count.
 				// Over time stale nodes stop responding; re-bootstrapping renews the routing table.
-				log.Println("[DHT Crawler] Periodic re-bootstrap to refresh routing table...")
-				go func() {
-					stats, err := c.dhtServer.Bootstrap()
-					if err != nil {
-						log.Printf("[DHT Crawler] Re-bootstrap note: %v", err)
-					} else {
-						log.Printf("[DHT Crawler] Re-bootstrap done. Responses: %d", stats.NumResponses)
-					}
-				}()
+				if c.isBootstrapping.CompareAndSwap(false, true) {
+					c.wg.Add(1)
+					go func() {
+						defer c.wg.Done()
+						defer c.isBootstrapping.Store(false)
+						log.Println("[DHT Crawler] Periodic re-bootstrap to refresh routing table...")
+						stats, err := c.dhtServer.Bootstrap()
+						if err != nil {
+							log.Printf("[DHT Crawler] Re-bootstrap note: %v", err)
+						} else {
+							log.Printf("[DHT Crawler] Re-bootstrap done. Responses: %d", stats.NumResponses)
+						}
+					}()
+				}
 			case <-ticker.C:
 				nodes := c.dhtServer.Nodes()
 				if len(nodes) == 0 {
-					_, _ = c.dhtServer.Bootstrap()
+					if c.isBootstrapping.CompareAndSwap(false, true) {
+						c.wg.Add(1)
+						go func() {
+							defer c.wg.Done()
+							defer c.isBootstrapping.Store(false)
+							_, _ = c.dhtServer.Bootstrap()
+						}()
+					}
 					continue
 				}
 
-				// Fix #2: Shuffle nodes so we don't always query the same top-15 stale entries.
-				// Without shuffling, the crawler exhausts the same stale peers every tick.
+				// Shuffle nodes so we don't always query the same top-15 stale entries.
 				rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
 
-				querySem := make(chan struct{}, 20)
 				// Sample across up to 15 randomly selected nodes in the table each tick
 				for i := 0; i < len(nodes) && i < 15; i++ {
+					if c.ctx.Err() != nil {
+						return
+					}
 					node := nodes[i]
 					nodeAddr := dht.NewAddr(node.Addr.UDP())
 
@@ -390,9 +436,12 @@ func (c *Crawler) Start() {
 
 					// 1. Send find_node to discover further nodes and insert into table
 					select {
-					case querySem <- struct{}{}:
+					case c.querySem <- struct{}{}:
 						go func(addr dht.Addr, target int160.T) {
-							defer func() { <-querySem }()
+							defer func() { <-c.querySem }()
+							if c.ctx.Err() != nil {
+								return
+							}
 							c.dhtServer.FindNode(addr, target, dht.QueryRateLimiting{NotAny: true})
 						}(nodeAddr, targetID)
 					default:
@@ -400,9 +449,12 @@ func (c *Crawler) Start() {
 
 					// 2. Send BEP 51 sample_infohashes query directly to harvest torrent hashes
 					select {
-					case querySem <- struct{}{}:
+					case c.querySem <- struct{}{}:
 						go func(addr dht.Addr, target [20]byte, peerIP net.IP, peerPort int) {
-							defer func() { <-querySem }()
+							defer func() { <-c.querySem }()
+							if c.ctx.Err() != nil {
+								return
+							}
 							ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
 							defer cancel()
 
@@ -436,8 +488,14 @@ func (c *Crawler) Start() {
 	}()
 
 	// Periodic zero-size torrent metadata backfill loop
+	c.wg.Add(1)
 	go func() {
-		time.Sleep(10 * time.Second)
+		defer c.wg.Done()
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(10 * time.Second):
+		}
 		ticker := time.NewTicker(45 * time.Second)
 		defer ticker.Stop()
 
@@ -446,6 +504,7 @@ func (c *Crawler) Start() {
 			case <-c.ctx.Done():
 				return
 			case <-ticker.C:
+				c.flushBandwidth()
 				if c.IsMonthlyLimitExceeded() || len(c.workChan) > 10 {
 					continue
 				}
@@ -467,34 +526,49 @@ func (c *Crawler) Start() {
 	}()
 
 	for i := 0; i < c.cfg.Workers; i++ {
+		c.wg.Add(1)
 		go c.worker(i)
 	}
 }
 
-func (c *Crawler) flushBandwidthLocked() {
+func (c *Crawler) flushBandwidth() {
 	if c.store == nil {
 		return
 	}
+	c.bwMu.Lock()
 	deltaDown := c.lastClientRead - c.lastPersistRead
 	deltaUp := c.lastClientWritten - c.lastPersistWrite
 	if deltaDown > 0 || deltaUp > 0 {
-		_ = c.store.AddBandwidthStats(deltaDown, deltaUp)
 		c.lastPersistRead = c.lastClientRead
 		c.lastPersistWrite = c.lastClientWritten
+	}
+	limitBytes := c.cfg.MonthlyDataLimitBytes
+	c.bwMu.Unlock()
+
+	if deltaDown > 0 || deltaUp > 0 {
+		_ = c.store.AddBandwidthStats(deltaDown, deltaUp)
+	}
+
+	if limitBytes > 0 {
+		if bs, err := c.store.GetBandwidthStats(); err == nil {
+			c.monthlyLimitExceeded.Store((bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes) >= limitBytes)
+		}
+	} else {
+		c.monthlyLimitExceeded.Store(false)
 	}
 }
 
 func (c *Crawler) Stop() {
 	c.cancel()
+	c.wg.Wait()
+
 	if c.dhtServer != nil {
 		c.dhtServer.Close()
 	}
 	if c.client != nil {
 		c.client.Close()
 	}
-	c.bwMu.Lock()
-	c.flushBandwidthLocked()
-	c.bwMu.Unlock()
+	c.flushBandwidth()
 }
 
 func (c *Crawler) enqueue(hash metainfo.Hash, ip net.IP, port int) {
@@ -502,20 +576,23 @@ func (c *Crawler) enqueue(hash metainfo.Hash, ip net.IP, port int) {
 }
 
 func (c *Crawler) enqueueWithTrackers(hash metainfo.Hash, ip net.IP, port int, trackers []string) {
-	if c.IsMonthlyLimitExceeded() {
+	if c.monthlyLimitExceeded.Load() {
 		return
 	}
 
 	hashHex := hex.EncodeToString(hash[:])
 
-	// Check if already in DB with known size > 0
-	rec, err := c.store.GetTorrentByHash(hashHex)
-	if err == nil && rec != nil && rec.Size > 0 && rec.FileCount > 0 {
+	// Check bounded visited cache first before touching database or locks
+	if c.visited.HasOrAdd(hashHex) {
 		return
 	}
 
-	if c.visited.HasOrAdd(hashHex) && (rec == nil || rec.Size > 0) {
-		return
+	// Check if already in DB with known size > 0
+	if c.store != nil {
+		rec, err := c.store.GetTorrentByHash(hashHex)
+		if err == nil && rec != nil && rec.Size > 0 && rec.FileCount > 0 {
+			return
+		}
 	}
 
 	select {
@@ -643,11 +720,15 @@ func (c *Crawler) ResolveMetadataNow(ctx context.Context, hashHex string, extraT
 }
 
 func (c *Crawler) worker(id int) {
+	defer c.wg.Done()
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case job := <-c.workChan:
+			if c.ctx.Err() != nil {
+				return
+			}
 			c.resolveMetadata(job)
 		}
 	}
@@ -883,10 +964,11 @@ func contains(a, b string) bool {
 	return false
 }
 
-func (c *Crawler) sampleBandwidthLocked() {
+func (c *Crawler) sampleBandwidthLocked() (int64, int64) {
 	now := time.Now()
 	elapsed := now.Sub(c.lastStatsSample).Seconds()
 
+	var deltaPersistDown, deltaPersistUp int64
 	if c.client != nil {
 		cs := c.client.Stats()
 		currentRead := cs.BytesRead.Int64()
@@ -914,17 +996,26 @@ func (c *Crawler) sampleBandwidthLocked() {
 		}
 		c.lastStatsSample = now
 
-		// Persist deltas to SQLite store if accumulated > 32KB or periodically
-		deltaPersistDown := c.lastClientRead - c.lastPersistRead
-		deltaPersistUp := c.lastClientWritten - c.lastPersistWrite
-		if deltaPersistDown >= 32*1024 || deltaPersistUp >= 32*1024 {
-			c.flushBandwidthLocked()
+		// Return deltas to persist if accumulated > 32KB
+		dpd := c.lastClientRead - c.lastPersistRead
+		dpu := c.lastClientWritten - c.lastPersistWrite
+		if dpd >= 32*1024 || dpu >= 32*1024 {
+			deltaPersistDown = dpd
+			deltaPersistUp = dpu
+			c.lastPersistRead = c.lastClientRead
+			c.lastPersistWrite = c.lastClientWritten
 		}
 	}
+	return deltaPersistDown, deltaPersistUp
 }
 
 func (c *Crawler) Metrics() Metrics {
-	m := c.metrics
+	var m Metrics
+	m.AnnouncesReceived = atomic.LoadInt64(&c.metrics.AnnouncesReceived)
+	m.MetadataResolved = atomic.LoadInt64(&c.metrics.MetadataResolved)
+	m.MetadataFailed = atomic.LoadInt64(&c.metrics.MetadataFailed)
+	m.ActiveResolving = atomic.LoadInt64(&c.metrics.ActiveResolving)
+
 	m.QueueLen = len(c.workChan)
 	if c.dhtServer != nil {
 		stats := c.dhtServer.Stats()
@@ -933,7 +1024,7 @@ func (c *Crawler) Metrics() Metrics {
 	}
 
 	c.bwMu.Lock()
-	c.sampleBandwidthLocked()
+	deltaDown, deltaUp := c.sampleBandwidthLocked()
 	m.DownloadBytesRate = c.currentDlRate
 	m.UploadBytesRate = c.currentUlRate
 	m.TotalDownloaded = c.totalDownloaded
@@ -943,19 +1034,28 @@ func (c *Crawler) Metrics() Metrics {
 	m.MaxDownloadRate = c.cfg.MaxDownloadRate
 	m.MaxUploadRate = c.cfg.MaxUploadRate
 	m.MonthlyDataLimitBytes = c.cfg.MonthlyDataLimitBytes
+	limitBytes := c.cfg.MonthlyDataLimitBytes
+	c.bwMu.Unlock()
+
+	m.MonthlyLimitExceeded = c.monthlyLimitExceeded.Load()
 
 	if c.store != nil {
+		if deltaDown > 0 || deltaUp > 0 {
+			_ = c.store.AddBandwidthStats(deltaDown, deltaUp)
+		}
 		if bs, err := c.store.GetBandwidthStats(); err == nil {
 			m.MonthlyDownloaded = bs.MonthlyDownloadedBytes
 			m.MonthlyUploaded = bs.MonthlyUploadedBytes
 			m.MonthlyTotalUsed = bs.MonthlyDownloadedBytes + bs.MonthlyUploadedBytes
 			m.CurrentMonth = bs.CurrentMonth
-			if c.cfg.MonthlyDataLimitBytes > 0 && m.MonthlyTotalUsed >= c.cfg.MonthlyDataLimitBytes {
+			if limitBytes > 0 && m.MonthlyTotalUsed >= limitBytes {
 				m.MonthlyLimitExceeded = true
+				c.monthlyLimitExceeded.Store(true)
+			} else {
+				c.monthlyLimitExceeded.Store(false)
 			}
 		}
 	}
-	c.bwMu.Unlock()
 
 	return m
 }

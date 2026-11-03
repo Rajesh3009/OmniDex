@@ -819,7 +819,7 @@ func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 		       resolution, codec, quality, audio, hdr, release_group, is_suspicious, spam_score, COALESCE(spam_reasons, ''),
 		       COALESCE(last_scraped, ''), COALESCE(scrape_fails, 0)
 		FROM torrents
-		WHERE LOWER(info_hash) = ?
+		WHERE info_hash = ?
 		LIMIT 1
 	`, cleanHash)
 
@@ -882,7 +882,7 @@ func (s *Store) DeleteTorrent(infoHash string) error {
 	if cleanHash == "" {
 		return fmt.Errorf("empty info_hash")
 	}
-	res, err := s.db.Exec("DELETE FROM torrents WHERE LOWER(info_hash) = ?", cleanHash)
+	res, err := s.db.Exec("DELETE FROM torrents WHERE info_hash = ?", cleanHash)
 	if err != nil {
 		return err
 	}
@@ -968,7 +968,7 @@ func (s *Store) UpdatePeerCount(infoHash string, seeders, leechers int) error {
 	_, err := s.db.Exec(`
 		UPDATE torrents
 		SET seeders = ?, leechers = ?, last_seen = CURRENT_TIMESTAMP
-		WHERE LOWER(info_hash) = ?
+		WHERE info_hash = ?
 	`, seeders, leechers, cleanHash)
 	return err
 }
@@ -981,7 +981,7 @@ func (s *Store) UpdateScrapeResult(infoHash string, seeders, leechers int, succe
 		_, err := s.db.Exec(`
 			UPDATE torrents
 			SET last_scraped = CURRENT_TIMESTAMP
-			WHERE LOWER(info_hash) = ?
+			WHERE info_hash = ?
 		`, cleanHash)
 		return err
 	}
@@ -991,7 +991,7 @@ func (s *Store) UpdateScrapeResult(infoHash string, seeders, leechers int, succe
 		_, err := s.db.Exec(`
 			UPDATE torrents
 			SET seeders = ?, leechers = ?, last_scraped = CURRENT_TIMESTAMP, last_seen = CURRENT_TIMESTAMP, scrape_fails = 0
-			WHERE LOWER(info_hash) = ?
+			WHERE info_hash = ?
 		`, seeders, leechers, cleanHash)
 		return err
 	}
@@ -1000,7 +1000,7 @@ func (s *Store) UpdateScrapeResult(infoHash string, seeders, leechers int, succe
 	_, err := s.db.Exec(`
 		UPDATE torrents
 		SET seeders = 0, leechers = 0, last_scraped = CURRENT_TIMESTAMP, scrape_fails = scrape_fails + 1
-		WHERE LOWER(info_hash) = ?
+		WHERE info_hash = ?
 	`, cleanHash)
 	return err
 }
