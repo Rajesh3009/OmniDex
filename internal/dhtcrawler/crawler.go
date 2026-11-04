@@ -69,25 +69,6 @@ type Metrics struct {
 	CurrentMonth          string  `json:"current_month"`           // YYYY-MM
 }
 
-type GraphNode struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Type     string `json:"type"` // "local", "router", "peer", "torrent"
-	Addr     string `json:"addr,omitempty"`
-	Distance int    `json:"distance,omitempty"`
-}
-
-type GraphLink struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
-	Type   string `json:"type"` // "routing", "announce", "resolving"
-}
-
-type DHTGraphData struct {
-	Nodes []GraphNode `json:"nodes"`
-	Links []GraphLink `json:"links"`
-}
-
 type boundedCache struct {
 	mu      sync.Mutex
 	items   map[string]struct{}
@@ -1060,59 +1041,4 @@ func (c *Crawler) Metrics() Metrics {
 	return m
 }
 
-func (c *Crawler) GetGraphData() DHTGraphData {
-	data := DHTGraphData{
-		Nodes: make([]GraphNode, 0),
-		Links: make([]GraphLink, 0),
-	}
-
-	if c.dhtServer == nil {
-		return data
-	}
-
-	srvID := c.dhtServer.ID()
-	localID := hex.EncodeToString(srvID[:])
-	localShort := localID
-	if len(localShort) > 8 {
-		localShort = localShort[:8]
-	}
-
-	// 1. Central Local Node
-	data.Nodes = append(data.Nodes, GraphNode{
-		ID:    localID,
-		Label: "Local Node (" + localShort + ")",
-		Type:  "local",
-		Addr:  c.dhtServer.Addr().String(),
-	})
-
-	// 2. Discovered DHT Routing Table Nodes
-	nodes := c.dhtServer.Nodes()
-	maxRender := 50
-	for i, n := range nodes {
-		if i >= maxRender {
-			break
-		}
-		nodeHex := hex.EncodeToString(n.ID[:])
-		short := nodeHex
-		if len(short) > 6 {
-			short = short[:6]
-		}
-		addrStr := n.Addr.String()
-
-		data.Nodes = append(data.Nodes, GraphNode{
-			ID:    nodeHex,
-			Label: short + "@" + addrStr,
-			Type:  "peer",
-			Addr:  addrStr,
-		})
-
-		data.Links = append(data.Links, GraphLink{
-			Source: localID,
-			Target: nodeHex,
-			Type:   "routing",
-		})
-	}
-
-	return data
-}
 

@@ -927,14 +927,15 @@ body {
   cursor: pointer;
   text-decoration: none;
   font-size: 0.85rem;
-  transition: var(--transition);
+  transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
 .btn-icon:hover {
-  background: var(--accent-blue);
-  color: #fff;
-  border-color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
 }
 
 /* Peer Badges (Seeders & Leechers) */
@@ -1003,23 +1004,50 @@ body {
 }
 
 .btn-icon-scrape {
-  transition: transform 0.2s ease, color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .btn-icon-scrape:hover {
-  color: var(--accent-cyan);
-  transform: rotate(45deg);
+  background: rgba(6, 182, 212, 0.2) !important;
+  color: #38bdf8 !important;
+  border-color: rgba(6, 182, 212, 0.5) !important;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
+}
+
+.btn-icon-magnet:hover {
+  background: rgba(236, 72, 153, 0.2) !important;
+  color: #f472b6 !important;
+  border-color: rgba(236, 72, 153, 0.5) !important;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.4);
+}
+
+.btn-icon-delete:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
 }
 
 .btn-icon-scrape.spinning, .spinning {
-  animation: omniSpin 0.8s linear infinite !important;
+  background: rgba(6, 182, 212, 0.25) !important;
+  border-color: var(--accent-cyan) !important;
+  color: #38bdf8 !important;
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.6) !important;
+  animation: omniHighlightPulse 0.9s ease-in-out infinite alternate !important;
   pointer-events: none;
-  opacity: 0.8;
 }
 
-@keyframes omniSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@keyframes omniHighlightPulse {
+  0% {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: rgba(6, 182, 212, 0.35);
+    box-shadow: 0 0 6px rgba(6, 182, 212, 0.25);
+  }
+  100% {
+    background: rgba(6, 182, 212, 0.35);
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 16px rgba(6, 182, 212, 0.7);
+  }
 }
 
 /* Modal */
@@ -1876,14 +1904,6 @@ body {
     padding: 3px 8px;
   }
 
-  /* DHT canvas container on mobile */
-  #modal-graph .modal-content {
-    max-height: 92vh;
-  }
-
-  #modal-graph canvas {
-    max-height: 320px;
-  }
 }
 
 /* ==========================================================================
@@ -1948,12 +1968,6 @@ body {
 
 .feed-item-card:hover {
   border-color: rgba(255, 255, 255, 0.2);
-}
-
-.btn-icon-delete:hover {
-  background: rgba(239, 68, 68, 0.2) !important;
-  color: #f87171 !important;
-  border-color: rgba(239, 68, 68, 0.4) !important;
 }
 
 .masked-api-key {
