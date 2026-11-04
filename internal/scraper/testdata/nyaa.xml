@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:nyaa="https://nyaa.si/xmlns/nyaa">
+  <channel>
+    <title>Nyaa - Torrents</title>
+    <description>RSS Feed for Nyaa</description>
+    <link>https://nyaa.si/</link>
+    <atom:link href="https://nyaa.si/?page=rss" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Show &amp; Tell - 01 (1080p) [&#39;Sub&#39;]</title>
+      <link>https://nyaa.si/view/100001</link>
+      <guid isPermaLink="true">https://nyaa.si/view/100001</guid>
+      <pubDate>Sun, 15 Oct 2026 12:00:00 -0000</pubDate>
+      <nyaa:seeders>12</nyaa:seeders>
+      <nyaa:leechers>3</nyaa:leechers>
+      <nyaa:downloads>150</nyaa:downloads>
+      <nyaa:infoHash>aec9b1182f520e27af38955dce4cec9118ac115f</nyaa:infoHash>
+      <nyaa:categoryId>1_2</nyaa:categoryId>
+      <nyaa:category>Anime - English-translated</nyaa:category>
+      <nyaa:size>1.5 GiB</nyaa:size>
+      <nyaa:comments>0</nyaa:comments>
+      <nyaa:trusted>No</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[<a href="https://nyaa.si/view/100001">Show & Tell episode 1</a>]]></description>
+    </item>
+    <item>
+      <title>Caf&eacute; &amp; 日本語 Original Soundtrack</title>
+      <link>https://nyaa.si/view/100002</link>
+      <guid isPermaLink="true">https://nyaa.si/view/100002</guid>
+      <pubDate>Mon, 16 Oct 2026 08:30:00 +0000</pubDate>
+      <nyaa:seeders>28</nyaa:seeders>
+      <nyaa:leechers>5</nyaa:leechers>
+      <nyaa:downloads>410</nyaa:downloads>
+      <nyaa:infoHash>B0C1D2E3F405162738495A6B7C8D9E0F1A2B3C4D</nyaa:infoHash>
+      <nyaa:categoryId>2_1</nyaa:categoryId>
+      <nyaa:category>Audio - Lossless</nyaa:category>
+      <nyaa:size>700.5 MiB</nyaa:size>
+      <nyaa:comments>2</nyaa:comments>
+      <nyaa:trusted>Yes</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[<a href="https://nyaa.si/view/100002">Audio soundtrack</a>]]></description>
+    </item>
+    <item>
+      <title>Light Novel Series Vol 01-05 [EPUB]</title>
+      <link>https://nyaa.si/view/100003</link>
+      <guid isPermaLink="true">https://nyaa.si/view/100003</guid>
+      <pubDate>Tue, 17 Oct 2026 15:45:00 GMT</pubDate>
+      <nyaa:seeders>15</nyaa:seeders>
+      <nyaa:leechers>1</nyaa:leechers>
+      <nyaa:downloads>88</nyaa:downloads>
+      <nyaa:infoHash>c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9</nyaa:infoHash>
+      <nyaa:categoryId>3_1</nyaa:categoryId>
+      <nyaa:category>Literature - English-translated</nyaa:category>
+      <nyaa:size>150.2 MiB</nyaa:size>
+      <nyaa:comments>1</nyaa:comments>
+      <nyaa:trusted>No</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[<a href="https://nyaa.si/view/100003">Light novel collection</a>]]></description>
+    </item>
+  </channel>
+</rss>

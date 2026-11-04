@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>TorrentDownloads.pro RSS Feed</title>
+    <link>https://www.torrentdownloads.pro</link>
+    <description>Daily torrent feed from TorrentDownloads</description>
+    <item>
+      <title>Kill Jackie S01 2160p WEBRip HDR x265-KONTRAST</title>
+      <link>/torrent/1654321/kill-jackie-s01-2160p</link>
+      <guid>/torrent/1654321/kill-jackie-s01-2160p</guid>
+      <pubDate>Sat, 10 Oct 2026 01:40:07 +0200</pubDate>
+      <category><![CDATA[TV Shows]]></category>
+      <size>23379695704</size>
+      <seeders>6</seeders>
+      <leechers>34</leechers>
+      <info_hash>23429A9AE77301514B02DCD1D6ADB17BB87F80C5</info_hash>
+    </item>
+    <item>
+      <title>Unknown Swarm Release 2026</title>
+      <link>/torrent/1654322/unknown-swarm-release</link>
+      <guid>/torrent/1654322/unknown-swarm-release</guid>
+      <pubDate>Sun, 11 Oct 2026 03:15:00 +0000</pubDate>
+      <category><![CDATA[Movies]]></category>
+      <size>1073741824</size>
+      <seeders>16777215</seeders>
+      <leechers>16777215</leechers>
+      <info_hash>abcdef0123456789abcdef0123456789abcdef01</info_hash>
+    </item>
+  </channel>
+</rss>

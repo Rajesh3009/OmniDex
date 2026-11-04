@@ -1,0 +1,38 @@
+{
+  "imdb_id": "0944947",
+  "torrents_count": 2,
+  "limit": 100,
+  "page": 1,
+  "torrents": [
+    {
+      "id": 2001,
+      "hash": "0123456789abcdef0123456789abcdef01234567",
+      "filename": "Fixture.Show.S02E01.720p.WEB.H264-FIX[eztv].mkv",
+      "episode_url": "https://eztvx.to/ep/2001/fixture-show-s02e01-720p-web-h264-fix",
+      "torrent_url": "https://zoink.ch/torrent/Fixture.Show.S02E01.720p.WEB.H264-FIX[eztv].mkv.torrent",
+      "magnet_url": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Fixture.Show.S02E01.720p.WEB.H264-FIX%20EZTV&tr=udp://open.stealth.si:80/announce",
+      "title": "Fixture Show S02E01 720p WEB H264-FIX EZTV",
+      "small_screenshot": "",
+      "large_screenshot": "",
+      "seeds": 25,
+      "peers": 4,
+      "date_released_unix": 1700000000,
+      "size_bytes": "1080141019"
+    },
+    {
+      "id": 2002,
+      "hash": "FEDCBA9876543210FEDCBA9876543210FEDCBA98",
+      "filename": "Fixture.Show.S02E01.1080p.WEB.H265-FIX.mkv",
+      "episode_url": "https://eztvx.to/ep/2002/fixture-show-s02e01-1080p-web-h265-fix",
+      "torrent_url": "https://zoink.ch/torrent/Fixture.Show.S02E01.1080p.WEB.H265-FIX.mkv.torrent",
+      "magnet_url": "magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98&dn=Fixture.Show.S02E01.1080p.WEB.H265-FIX&tr=udp://open.stealth.si:80/announce",
+      "title": "Fixture Show S02E01 1080p WEB H265-FIX [eztv]",
+      "small_screenshot": "",
+      "large_screenshot": "",
+      "seeds": 42,
+      "peers": 7,
+      "date_released_unix": 1700000500,
+      "size_bytes": 2147483648
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:nyaa="https://nyaa.si/xmlns/nyaa">
+  <channel>
+    <title>Sukebei - Torrents</title>
+    <description>RSS Feed for Sukebei</description>
+    <link>https://sukebei.nyaa.si/</link>
+    <atom:link href="https://sukebei.nyaa.si/?page=rss" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Fixture Clip 01 &amp; Visuals</title>
+      <link>https://sukebei.nyaa.si/view/200001</link>
+      <guid isPermaLink="true">https://sukebei.nyaa.si/view/200001</guid>
+      <pubDate>Wed, 18 Oct 2026 20:00:00 +0000</pubDate>
+      <nyaa:seeders>1</nyaa:seeders>
+      <nyaa:leechers>0</nyaa:leechers>
+      <nyaa:downloads>45</nyaa:downloads>
+      <nyaa:infoHash>aec9b1182f520e27af38955dce4cec9118ac115f</nyaa:infoHash>
+      <nyaa:categoryId>2_2</nyaa:categoryId>
+      <nyaa:category>Art - Anime</nyaa:category>
+      <nyaa:size>1.1 GiB</nyaa:size>
+      <nyaa:comments>0</nyaa:comments>
+      <nyaa:trusted>No</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[Adult clip]]></description>
+    </item>
+    <item>
+      <title>Adult Art Book &amp; CG Collection</title>
+      <link>https://sukebei.nyaa.si/view/200002</link>
+      <guid isPermaLink="true">https://sukebei.nyaa.si/view/200002</guid>
+      <pubDate>Thu, 19 Oct 2026 21:00:00 +0000</pubDate>
+      <nyaa:seeders>9</nyaa:seeders>
+      <nyaa:leechers>2</nyaa:leechers>
+      <nyaa:downloads>120</nyaa:downloads>
+      <nyaa:infoHash>d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9</nyaa:infoHash>
+      <nyaa:categoryId>1_2</nyaa:categoryId>
+      <nyaa:category>Art - Pictures</nyaa:category>
+      <nyaa:size>550.0 MiB</nyaa:size>
+      <nyaa:comments>1</nyaa:comments>
+      <nyaa:trusted>Yes</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[Image set CG]]></description>
+    </item>
+    <item>
+      <title>Adult Doujin Miscellaneous</title>
+      <link>https://sukebei.nyaa.si/view/200003</link>
+      <guid isPermaLink="true">https://sukebei.nyaa.si/view/200003</guid>
+      <pubDate>Fri, 20 Oct 2026 22:00:00 +0000</pubDate>
+      <nyaa:seeders>4</nyaa:seeders>
+      <nyaa:leechers>1</nyaa:leechers>
+      <nyaa:downloads>30</nyaa:downloads>
+      <nyaa:infoHash>e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0</nyaa:infoHash>
+      <nyaa:categoryId>1_3</nyaa:categoryId>
+      <nyaa:category>Art - Other</nyaa:category>
+      <nyaa:size>250.0 MiB</nyaa:size>
+      <nyaa:comments>0</nyaa:comments>
+      <nyaa:trusted>No</nyaa:trusted>
+      <nyaa:remake>No</nyaa:remake>
+      <description><![CDATA[Doujin other]]></description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,79 @@
+{
+  "status": "ok",
+  "status_message": "Query was successful",
+  "data": {
+    "movie_count": 2,
+    "limit": 50,
+    "page_number": 1,
+    "movies": [
+      {
+        "id": 101,
+        "url": "https://yts.mx/movies/fixture-movie-2024",
+        "title": "Fixture Movie",
+        "title_long": "Fixture Movie (2024)",
+        "year": 2024,
+        "torrents": [
+          {
+            "url": "https://yts.mx/torrent/download/0123456789ABCDEF0123456789ABCDEF01234567",
+            "hash": "0123456789ABCDEF0123456789ABCDEF01234567",
+            "quality": "720p",
+            "type": "bluray",
+            "seeds": 12,
+            "peers": 3,
+            "size_bytes": 874575299,
+            "date_uploaded_unix": 1700000000
+          },
+          {
+            "url": "https://yts.mx/torrent/download/89ABCDEF0123456789ABCDEF0123456789ABCDEF",
+            "hash": "89ABCDEF0123456789ABCDEF0123456789ABCDEF",
+            "quality": "1080p",
+            "type": "bluray",
+            "seeds": 25,
+            "peers": 4,
+            "size_bytes": 1621350154,
+            "date_uploaded_unix": 1700000500
+          },
+          {
+            "url": "https://yts.mx/torrent/download/FEDCBA9876543210FEDCBA9876543210FEDCBA98",
+            "hash": "FEDCBA9876543210FEDCBA9876543210FEDCBA98",
+            "quality": "2160p",
+            "type": "bluray",
+            "seeds": 40,
+            "peers": 10,
+            "size_bytes": 5368709120,
+            "date_uploaded_unix": 1700001000
+          }
+        ]
+      },
+      {
+        "id": 102,
+        "url": "https://yts.mx/movies/second-feature-film-2023",
+        "title": "Second Feature Film",
+        "title_long": "Second Feature Film (2023)",
+        "year": 2023,
+        "torrents": [
+          {
+            "url": "https://yts.mx/torrent/download/1111222233334444555566667777888899990000",
+            "hash": "1111222233334444555566667777888899990000",
+            "quality": "480p",
+            "type": "web",
+            "seeds": 8,
+            "peers": 2,
+            "size_bytes": 500000000,
+            "date_uploaded_unix": 1690000000
+          },
+          {
+            "url": "https://yts.mx/torrent/download/2222333344445555666677778888999900001111",
+            "hash": "2222333344445555666677778888999900001111",
+            "quality": "3D",
+            "type": "bluray",
+            "seeds": 5,
+            "peers": 1,
+            "size_bytes": 2500000000,
+            "date_uploaded_unix": 1690000500
+          }
+        ]
+      }
+    ]
+  }
+}
