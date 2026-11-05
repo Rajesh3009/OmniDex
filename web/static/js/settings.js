@@ -361,23 +361,25 @@ async function loadFeedsList() {
       const typeLabel = (feed.type || 'rss').toUpperCase();
       const statusColor = feed.last_error ? '#ef4444' : '#10b981';
       const statusText = feed.last_error ? `Error: ${feed.last_error}` : `OK · Last: ${lastSync}`;
+      const interval = feed.interval_minutes || feed.interval_min || 30;
+      const count = feed.last_count !== undefined ? feed.last_count : (feed.item_count || 0);
 
       return `
         <div class="feed-item-card" data-feed-id="${feed.id}">
-          <div style="flex: 1; min-width: 0;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+          <div style="flex: 1; min-width: 0; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
               <strong style="color: var(--text-main); font-size: 0.95rem;">${escapeHtml(feed.name)}</strong>
               <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); font-size: 0.72rem;">${typeLabel}</span>
-              <span style="font-size: 0.78rem; color: var(--text-dim);">Every ${feed.interval_min}m</span>
+              <span style="font-size: 0.78rem; color: var(--text-dim);">Every ${interval}m</span>
             </div>
-            <div style="font-size: 0.8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace;">
+            <div style="font-size: 0.8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace;" title="${escapeHtml(feed.url)}">
               ${escapeHtml(feed.url)}
             </div>
-            <div style="font-size: 0.75rem; color: ${statusColor}; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${escapeHtml(statusText)} · Items: ${feed.item_count || 0}
+            <div style="font-size: 0.75rem; color: ${statusColor}; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(statusText)}">
+              ${escapeHtml(statusText)} · Items: ${count}
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
             <button type="button" class="btn btn-secondary btn-sync-single-feed" data-id="${feed.id}" style="padding: 6px 10px; font-size: 0.78rem;" title="Sync feed now">🔄 Sync</button>
             <button type="button" class="btn btn-secondary btn-icon-delete" data-id="${feed.id}" data-name="${escapeHtml(feed.name)}" style="padding: 6px 10px; font-size: 0.78rem;" title="Delete feed">🗑️</button>
           </div>

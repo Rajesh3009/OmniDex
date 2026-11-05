@@ -1963,6 +1963,9 @@ body {
   border-radius: var(--radius-sm);
   padding: 10px 14px;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   transition: border-color 0.2s ease;
 }
 
@@ -2147,10 +2150,11 @@ body {
 
 .settings-page-layout {
   display: grid;
-  grid-template-columns: 310px 1fr;
+  grid-template-columns: 310px minmax(0, 1fr);
   gap: 28px;
   align-items: flex-start;
   margin-bottom: 60px;
+  max-width: 100%;
 }
 
 .settings-sidebar {
@@ -2323,6 +2327,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+#settings-form {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .settings-section-card {
@@ -2335,6 +2348,9 @@ body {
   box-shadow: var(--shadow-sm);
   display: none;
   animation: fadeIn 0.25s ease-out;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .settings-section-card.active {
@@ -2353,6 +2369,8 @@ body {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 18px;
   margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 14px;
 }
 
 .settings-card-header h2 {
@@ -2412,6 +2430,10 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-top: 30px;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .settings-footer-hint {
