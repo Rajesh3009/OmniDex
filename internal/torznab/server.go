@@ -1,6 +1,7 @@
 package torznab
 
 import (
+	"crypto/subtle"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -123,7 +124,7 @@ func (s *Server) HandleTorznab(w http.ResponseWriter, r *http.Request) {
 		if providedKey == "" {
 			providedKey = r.Header.Get("X-API-KEY")
 		}
-		if providedKey != s.apiKey {
+		if subtle.ConstantTimeCompare([]byte(providedKey), []byte(s.apiKey)) != 1 {
 			s.handleError(w, 100, "Incorrect user credentials")
 			return
 		}

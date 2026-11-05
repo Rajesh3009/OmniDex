@@ -1,5 +1,6 @@
 {
   "web_port": 8686,
+  "web_bind_addr": "127.0.0.1",
   "dht_listen_addr": ":6881",
   "dht_workers": 15,
   "max_torrent_peers": 20,

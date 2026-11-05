@@ -267,6 +267,10 @@ func (ing *Ingester) fetchAndIngest(ctx context.Context, f config.FeedConfig) (i
 		}
 	}
 
+	if err := config.ValidateOutboundURL(reqURL); err != nil {
+		return 0, fmt.Errorf("feed URL rejected for security reasons: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, err

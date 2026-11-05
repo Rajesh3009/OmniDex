@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enhanced feed cards displaying sync interval, item count, and full URL tooltips.
   - Streamlined card action buttons with modern color glow highlights on hover and active states.
 
+### Security
+- **SSRF Prevention**: Added `ValidateOutboundURL` blocking cloud metadata endpoints (AWS, GCP, Azure), link-local addresses, and non-HTTP(S) schemes in feed ingestion and remote tracker updates.
+- **Timing-Safe Torznab Authentication**: Switched API key verification to `subtle.ConstantTimeCompare` to mitigate timing attacks.
+- **CSRF & Defense-in-Depth Headers**: Added security middleware enforcing `Origin`/`Referer` validation on mutable state requests, alongside `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy`.
+- **Default Bind Address & Key Generation**: Changed default web bind address to `127.0.0.1` and randomized initial Torznab API keys for new installations.
+- **XSS & CSP Hardening**: Replaced inline event handlers in rendered torrent rows with DOM event listeners; enforced strict `magnet:?` validation on URI redirects and magnet buttons.
+
 ## [1.3.1] - 2026-11-02
 
 ### Added

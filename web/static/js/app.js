@@ -1564,19 +1564,22 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     catBg = 'rgba(244, 63, 94, 0.15)';
     catBorder = 'rgba(244, 63, 94, 0.35)';
   }
-  const catBadge = `<span class="badge" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" onclick="event.stopPropagation(); setCategoryFilter('${escapeHtml(cat)}')" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
+  const catBadge = `<span class="badge btn-filter-cat" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" data-cat="${escapeHtml(cat)}" title="Filter by ${escapeHtml(cat)}">${escapeHtml(cat)}</span>`;
 
   let tagsHtml = '';
   const tagBadges = [];
   if (item.resolution) {
-    const cls = `tag-res-${item.resolution.toLowerCase()}`;
-    tagBadges.push(`<span class="tag-badge ${cls}" onclick="event.stopPropagation(); filterByTag('resolution', '${escapeHtml(item.resolution)}')">${escapeHtml(item.resolution)}</span>`);
+    const safeRes = String(item.resolution);
+    const cls = `tag-res-${escapeHtml(safeRes).toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+    tagBadges.push(`<span class="tag-badge ${cls} btn-filter-tag" data-tag-type="resolution" data-tag-val="${escapeHtml(safeRes)}">${escapeHtml(safeRes)}</span>`);
   }
   if (item.codec) {
-    tagBadges.push(`<span class="tag-badge tag-codec" onclick="event.stopPropagation(); filterByTag('codec', '${escapeHtml(item.codec)}')">${escapeHtml(item.codec)}</span>`);
+    const safeCodec = String(item.codec);
+    tagBadges.push(`<span class="tag-badge tag-codec btn-filter-tag" data-tag-type="codec" data-tag-val="${escapeHtml(safeCodec)}">${escapeHtml(safeCodec)}</span>`);
   }
   if (item.quality) {
-    tagBadges.push(`<span class="tag-badge tag-quality" onclick="event.stopPropagation(); filterByTag('quality', '${escapeHtml(item.quality)}')">${escapeHtml(item.quality)}</span>`);
+    const safeQuality = String(item.quality);
+    tagBadges.push(`<span class="tag-badge tag-quality btn-filter-tag" data-tag-type="quality" data-tag-val="${escapeHtml(safeQuality)}">${escapeHtml(safeQuality)}</span>`);
   }
   if (item.hdr) {
     tagBadges.push(`<span class="tag-badge tag-hdr">${escapeHtml(item.hdr)}</span>`);
@@ -1585,7 +1588,8 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     tagBadges.push(`<span class="tag-badge tag-audio">${escapeHtml(item.audio)}</span>`);
   }
   if (item.release_group) {
-    tagBadges.push(`<span class="tag-badge tag-group" onclick="event.stopPropagation(); filterByTag('releaseGroup', '${escapeHtml(item.release_group)}')">${escapeHtml(item.release_group)}</span>`);
+    const safeGroup = String(item.release_group);
+    tagBadges.push(`<span class="tag-badge tag-group btn-filter-tag" data-tag-type="releaseGroup" data-tag-val="${escapeHtml(safeGroup)}">${escapeHtml(safeGroup)}</span>`);
   }
   if (item.is_suspicious) {
     tagBadges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious (${item.spam_score}%)</span>`);
@@ -1598,7 +1602,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   let groupBadgeHtml = '';
   if (groupMeta && groupMeta.hasChildren) {
     groupBadgeHtml = `
-      <button class="btn-group-toggle" onclick="event.stopPropagation(); toggleReleaseGroup('${groupMeta.groupId}', this)">
+      <button class="btn-group-toggle" data-group-id="${escapeHtml(groupMeta.groupId)}">
         <span class="group-toggle-arrow">▶</span>
         <span>${groupMeta.totalReleases} releases</span>
       </button>
@@ -1616,21 +1620,26 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   const healthLabel = getHealthLabel(seeders);
   const scrapedText = item.last_scraped ? `Scraped ${formatTimeAgo(item.last_scraped)}` : 'Unscraped';
 
+  let safeMagnet = (item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name || '')}`);
+  if (!safeMagnet.startsWith('magnet:?')) {
+    safeMagnet = `magnet:?xt=urn:btih:${encodeURIComponent(item.info_hash)}&dn=${encodeURIComponent(item.name || '')}`;
+  }
+
   tr.innerHTML = `
     <td class="col-title torrent-title-cell" data-label="Title">
       <div style="display: flex; align-items: flex-start; gap: 6px;">
         ${groupBadgeHtml}
         <div style="flex: 1; min-width: 0;">
-          <a href="javascript:void(0)" class="torrent-title" onclick="showDetails(${index})">${escapeHtml(item.name)}</a>
+          <a href="javascript:void(0)" class="torrent-title btn-row-details" data-index="${index}">${escapeHtml(item.name)}</a>
           ${tagsHtml}
-          <div class="torrent-hash">${item.info_hash}</div>
+          <div class="torrent-hash">${escapeHtml(item.info_hash)}</div>
         </div>
       </div>
     </td>
     <td class="col-category" data-label="Category">${catBadge}</td>
     <td class="col-size" data-label="Size">${formatBytes(item.size)}</td>
     <td class="col-files" data-label="Files">
-      <button class="btn-files-badge" onclick="event.stopPropagation(); showFiles(${index})" title="View files in this torrent">
+      <button class="btn-files-badge btn-row-files" data-index="${index}" title="View files in this torrent">
         📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
       </button>
     </td>
@@ -1641,20 +1650,47 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
           <span class="${leechersClass}" title="${leechers} Leechers">▼ ${leechers}</span>
           <span class="health-badge ${healthClass}" title="Swarm Health: ${healthLabel}">${healthLabel}</span>
         </div>
-        <div class="scrape-meta-tip" style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">${scrapedText}</div>
+        <div class="scrape-meta-tip" style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">${escapeHtml(scrapedText)}</div>
       </div>
     </td>
     <td class="col-source" data-label="Source">${sourceBadge}</td>
     <td class="col-date" data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
     <td class="col-actions torrent-actions-cell" data-label="Actions" style="text-align: right;">
       <div class="action-btns" style="justify-content: flex-end;">
-        <button class="btn-icon btn-icon-scrape" id="scrape-btn-${item.info_hash}" onclick="event.stopPropagation(); triggerScrape('${item.info_hash}', this)" title="Refresh Live Peers via UDP Trackers">🔄</button>
-        <a href="${magnet}" class="btn-icon btn-icon-magnet" title="Magnet Download">🧲</a>
-        <button class="btn-icon btn-icon-delete" onclick="event.stopPropagation(); deleteTorrentPrompt('${item.info_hash}', '${escapeHtml(item.name).replace(/'/g, "\\'")}')" title="Delete from database">🗑️</button>
+        <button class="btn-icon btn-icon-scrape btn-row-scrape" id="scrape-btn-${escapeHtml(item.info_hash)}" data-hash="${escapeHtml(item.info_hash)}" title="Refresh Live Peers via UDP Trackers">🔄</button>
+        <a href="${escapeHtml(safeMagnet)}" class="btn-icon btn-icon-magnet" title="Magnet Download">🧲</a>
+        <button class="btn-icon btn-icon-delete btn-row-delete" data-hash="${escapeHtml(item.info_hash)}" data-index="${index}" title="Delete from database">🗑️</button>
       </div>
     </td>
   `;
   tbody.appendChild(tr);
+
+  // Safely attach event handlers without inline attribute evaluation
+  tr.querySelectorAll('.btn-row-details').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); showDetails(parseInt(el.dataset.index, 10)); });
+  });
+  tr.querySelectorAll('.btn-row-files').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); showFiles(parseInt(el.dataset.index, 10)); });
+  });
+  tr.querySelectorAll('.btn-filter-cat').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); setCategoryFilter(el.dataset.cat); });
+  });
+  tr.querySelectorAll('.btn-filter-tag').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); filterByTag(el.dataset.tagType, el.dataset.tagVal); });
+  });
+  tr.querySelectorAll('.btn-group-toggle').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); toggleReleaseGroup(el.dataset.groupId, el); });
+  });
+  tr.querySelectorAll('.btn-row-scrape').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); triggerScrape(el.dataset.hash, el); });
+  });
+  tr.querySelectorAll('.btn-row-delete').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const it = currentTorrents[parseInt(el.dataset.index, 10)];
+      deleteTorrentPrompt(el.dataset.hash, it ? it.name : '');
+    });
+  });
 }
 
 function toggleReleaseGroup(groupId, btn) {
@@ -1736,7 +1772,10 @@ async function openTorrentDetails(item) {
   if (tagsRow) {
     tagsRow.innerHTML = '';
     const badges = [];
-    if (item.resolution) badges.push(`<span class="tag-badge tag-res-${item.resolution.toLowerCase()}">📺 ${escapeHtml(item.resolution)}</span>`);
+        if (item.resolution) {
+      const cls = `tag-res-${escapeHtml(item.resolution).toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+      badges.push(`<span class="tag-badge ${cls}">📺 ${escapeHtml(item.resolution)}</span>`);
+    }
     if (item.codec) badges.push(`<span class="tag-badge tag-codec">🎞️ ${escapeHtml(item.codec)}</span>`);
     if (item.quality) badges.push(`<span class="tag-badge tag-quality">✨ ${escapeHtml(item.quality)}</span>`);
     if (item.hdr) badges.push(`<span class="tag-badge tag-hdr">🌈 ${escapeHtml(item.hdr)}</span>`);
@@ -1747,14 +1786,17 @@ async function openTorrentDetails(item) {
     tagsRow.style.display = badges.length > 0 ? 'flex' : 'none';
   }
   
-  const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
-  document.getElementById('detail-magnet').textContent = magnet;
-  document.getElementById('detail-magnet-link').href = magnet;
+  let safeDetailMagnet = item.magnet_uri || `magnet:?xt=urn:btih:${encodeURIComponent(item.info_hash)}&dn=${encodeURIComponent(item.name || '')}`;
+  if (!safeDetailMagnet.startsWith('magnet:?')) {
+    safeDetailMagnet = `magnet:?xt=urn:btih:${encodeURIComponent(item.info_hash)}&dn=${encodeURIComponent(item.name || '')}`;
+  }
+  document.getElementById('detail-magnet').textContent = safeDetailMagnet;
+  document.getElementById('detail-magnet-link').href = safeDetailMagnet;
 
   const btnCopyMagnet = document.getElementById('btn-copy-magnet');
   if (btnCopyMagnet) {
     btnCopyMagnet.onclick = () => {
-      navigator.clipboard.writeText(magnet).then(() => {
+      navigator.clipboard.writeText(safeDetailMagnet).then(() => {
         const orig = btnCopyMagnet.textContent;
         btnCopyMagnet.textContent = '✓ Copied!';
         setTimeout(() => btnCopyMagnet.textContent = orig, 1500);
@@ -2291,7 +2333,7 @@ async function loadFeedsList() {
           <div style="display: flex; gap: 6px; align-items: center;">
             <button type="button" class="btn btn-secondary btn-feed-sync" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" title="Sync this feed now">🔄</button>
             <button type="button" class="btn btn-secondary btn-feed-toggle" style="padding: 4px 10px; font-size: 0.8rem;" data-id="${escapeHtml(f.id)}" data-enabled="${!f.enabled}" title="${f.enabled ? 'Disable' : 'Enable'} feed">${f.enabled ? '⏸️' : '▶️'}</button>
-            <button type="button" class="btn btn-secondary btn-feed-delete" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" onclick="deleteFeed(this.dataset.id, this.dataset.name, this)" title="Delete feed">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-feed-delete" style="padding: 4px 10px; font-size: 0.8rem; color: #f87171;" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" title="Delete feed">🗑️</button>
           </div>
         </div>
       `;

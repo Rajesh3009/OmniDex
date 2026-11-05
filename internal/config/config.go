@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -18,6 +20,7 @@ type FeedConfig struct {
 
 type Config struct {
 	WebPort               int          `json:"web_port"`
+	WebBindAddr           string       `json:"web_bind_addr"`
 	DHTListenAddr         string       `json:"dht_listen_addr"`
 	DHTWorkers            int          `json:"dht_workers"`
 	MaxTorrentPeers       int          `json:"max_torrent_peers"`
@@ -44,14 +47,23 @@ type Config struct {
 	ScraperTrackersURL    string       `json:"scraper_trackers_url"`
 }
 
+func generateRandomKey() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "omni-indexer-secret-key"
+	}
+	return hex.EncodeToString(b)
+}
+
 func DefaultConfig() Config {
 	return Config{
 		WebPort:               8686,
+		WebBindAddr:           "127.0.0.1",
 		DHTListenAddr:         ":6881",
 		DHTWorkers:            15,
 		MaxTorrentPeers:       20,
 		DBPath:                "indexer.db",
-		TorznabAPIKey:         "local-indexer-secret-key",
+		TorznabAPIKey:         generateRandomKey(),
 		ProwlarrURL:           "http://localhost:9696",
 		ProwlarrAPIKey:        "",
 		MaxDownloadRate:       0,
@@ -130,6 +142,9 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
 	}
+	if cfg.WebBindAddr == "" {
+		cfg.WebBindAddr = "127.0.0.1"
+	}
 	if len(cfg.ScraperTrackers) == 0 {
 		cfg.ScraperTrackers = DefaultConfig().ScraperTrackers
 	}
@@ -204,4 +219,3 @@ func (c *Config) MatchesRetentionFilter(category, name string) bool {
 	// Combination logic: OR logic (matches either valid category OR contains required keyword)
 	return categoryMatch || keywordMatch
 }
-

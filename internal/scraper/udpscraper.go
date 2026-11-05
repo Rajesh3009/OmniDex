@@ -240,6 +240,10 @@ func (s *Scraper) UpdateTrackersFromRemote() {
 	if urlStr == "" {
 		return
 	}
+	if err := config.ValidateOutboundURL(urlStr); err != nil {
+		log.Printf("[Scraper] Notice: Remote tracker URL rejected: %v", err)
+		return
+	}
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, urlStr, nil)
 	if err != nil {

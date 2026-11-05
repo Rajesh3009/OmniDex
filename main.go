@@ -77,7 +77,11 @@ func main() {
 	}
 
 	// Initialize Torznab inbound server
-	baseURL := fmt.Sprintf("http://localhost:%d", cfg.WebPort)
+	baseURLHost := cfg.WebBindAddr
+	if baseURLHost == "" || baseURLHost == "0.0.0.0" {
+		baseURLHost = "localhost"
+	}
+	baseURL := fmt.Sprintf("http://%s:%d", baseURLHost, cfg.WebPort)
 	torznabServer := torznab.NewServer(store, cfg.TorznabAPIKey, baseURL)
 
 	// Initialize Prowlarr client
@@ -236,8 +240,8 @@ func main() {
 	})
 
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.WebPort),
-		Handler:      mux,
+		Addr:         fmt.Sprintf("%s:%d", cfg.WebBindAddr, cfg.WebPort),
+		Handler:      securityMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -245,8 +249,8 @@ func main() {
 	go func() {
 		log.Printf("=================================================================")
 		log.Printf("⚡ OmniDex - Hybrid DHT Indexer & Torznab Bridge v%s is running!", Version)
-		log.Printf("🌐 Web Dashboard:   http://localhost:%d", cfg.WebPort)
-		log.Printf("📡 Torznab Endpoint: http://localhost:%d/api/v1/torznab?apikey=%s", cfg.WebPort, cfg.TorznabAPIKey)
+		log.Printf("🌐 Web Dashboard:   http://%s:%d", cfg.WebBindAddr, cfg.WebPort)
+		log.Printf("📡 Torznab Endpoint: http://%s:%d/api/v1/torznab?apikey=%s", cfg.WebBindAddr, cfg.WebPort, cfg.TorznabAPIKey)
 		log.Printf("💾 Database:         %s (FTS5 enabled)", cfg.DBPath)
 		log.Printf("=================================================================")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -260,6 +264,47 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down...")
+}
+
+func isMaskedSecret(s string) bool {
+	return strings.Contains(s, "••••") || strings.Contains(s, "****")
+}
+
+func securityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set defensive security response headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';")
+
+		// Prevent Cross-Site Request Forgery (CSRF) on state-altering API methods
+		if r.Method == http.MethodPost || r.Method == http.MethodDelete || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			path := r.URL.Path
+			// Exclude Torznab endpoints which authenticate via API key
+			if !strings.HasPrefix(path, "/api/v1/torznab") && !strings.HasPrefix(path, "/torznab") && path != "/api" {
+				origin := r.Header.Get("Origin")
+				if origin != "" {
+					u, err := url.Parse(origin)
+					if err != nil || !strings.EqualFold(u.Host, r.Host) {
+						http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+						return
+					}
+				} else {
+					referer := r.Header.Get("Referer")
+					if referer != "" {
+						u, err := url.Parse(referer)
+						if err != nil || !strings.EqualFold(u.Host, r.Host) {
+							http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+							return
+						}
+					}
+				}
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -966,8 +1011,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	magnet := rec.MagnetURI
-	if magnet == "" {
-		magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", rec.InfoHash, rec.Name)
+	if !strings.HasPrefix(magnet, "magnet:?") {
+		magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", rec.InfoHash, url.QueryEscape(rec.Name))
 	}
 
 	raw := r.URL.Query().Get("raw") == "1" || r.URL.Query().Get("magnet") == "1"
@@ -979,6 +1024,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, magnet, http.StatusFound)
 		return
 	}
+
+	safeTitle := html.EscapeString(rec.Name)
+	safeHash := html.EscapeString(rec.InfoHash)
+	safeMagnetAttr := html.EscapeString(magnet)
+	magnetJSON, _ := json.Marshal(magnet)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
@@ -1081,18 +1131,35 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
     <div class="hash">%s</div>
     <div class="btn-group">
       <a href="%s" class="btn btn-primary" id="btn-open-magnet">🧲 Open in Torrent Client</a>
-      <button class="btn btn-secondary" onclick="navigator.clipboard.writeText('%s'); this.textContent = 'Copied Magnet URI!';">📋 Copy Magnet Link</button>
+      <button class="btn btn-secondary" id="btn-copy-magnet" data-magnet="%s">📋 Copy Magnet Link</button>
       <a href="/#%s" class="btn btn-secondary">🔍 View on OmniDex Dashboard</a>
     </div>
     <div class="info">Opening magnet in your torrent client automatically...</div>
   </div>
   <script>
-    setTimeout(function() {
-      window.location.href = "%s";
-    }, 100);
+    (function() {
+      var magnetUri = %s;
+      var copyBtn = document.getElementById('btn-copy-magnet');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function() {
+          var m = this.getAttribute('data-magnet') || magnetUri;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(m).then(function() {
+              copyBtn.textContent = 'Copied Magnet URI!';
+              setTimeout(function() { copyBtn.textContent = '📋 Copy Magnet Link'; }, 2000);
+            });
+          }
+        });
+      }
+      if (magnetUri && magnetUri.indexOf('magnet:?') === 0) {
+        setTimeout(function() {
+          window.location.href = magnetUri;
+        }, 100);
+      }
+    })();
   </script>
 </body>
-</html>`, html.EscapeString(rec.Name), html.EscapeString(rec.Name), rec.InfoHash, magnet, magnet, rec.InfoHash, magnet)
+</html>`, safeTitle, safeTitle, safeHash, safeMagnetAttr, safeMagnetAttr, safeHash, string(magnetJSON))
 	_, _ = w.Write([]byte(htmlContent))
 }
 
