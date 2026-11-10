@@ -88,6 +88,57 @@ func (s *ThePirateBayScraper) Search(ctx context.Context, query string, opts ...
 	return s.ParseHTML(resp.Body)
 }
 
+// Trending queries Apibay's top 100 recent/popular endpoint or falls back to top100 query.
+func (s *ThePirateBayScraper) Trending(ctx context.Context, opts ...Option) ([]Torrent, error) {
+	cfg := Options{
+		BaseURL:    s.baseURL,
+		HTTPClient: s.client,
+		Timeout:    15 * time.Second,
+		Limit:      100,
+		Page:       1,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+
+	topEndpoints := []string{
+		fmt.Sprintf("%s/precompiled/data_top100_recent.json", strings.TrimRight(cfg.BaseURL, "/")),
+		fmt.Sprintf("%s/q.php?q=top100:all", strings.TrimRight(cfg.BaseURL, "/")),
+	}
+
+	for _, endpoint := range topEndpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "OmniDex/1.3 (compatible; ScraperBot/1.0)")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := cfg.HTTPClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			torrents, err := s.ParseHTML(resp.Body)
+			resp.Body.Close()
+			if err == nil && len(torrents) > 0 {
+				if cfg.Limit > 0 && len(torrents) > cfg.Limit {
+					return torrents[:cfg.Limit], nil
+				}
+				return torrents, nil
+			}
+		} else {
+			resp.Body.Close()
+		}
+	}
+
+	return s.Search(ctx, "top100:all", opts...)
+}
+
 // ParseHTML parses raw JSON array or HTML table content from an io.Reader.
 func (s *ThePirateBayScraper) ParseHTML(r io.Reader) ([]Torrent, error) {
 	if r == nil {

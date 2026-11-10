@@ -61,6 +61,11 @@
           <span class="nav-label">External Feeds</span>
           <span class="nav-badge" id="badge-feeds-count">Feeds</span>
         </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-trending">
+          <span class="nav-icon-box">🔥</span>
+          <span class="nav-label">Trending Harvester</span>
+          <span class="nav-badge" style="color: #fb923c;">Top Seeds</span>
+        </button>
         <button type="button" class="settings-nav-item" data-tab="tab-scraper">
           <span class="nav-icon-box">📡</span>
           <span class="nav-label">Tracker Scraper</span>
@@ -311,6 +316,76 @@
               </div>
 
               <button type="button" id="btn-add-feed" class="btn btn-secondary" style="width: 100%; font-size: 0.88rem; padding: 9px;">➕ Add Feed to Schedule</button>
+            </div>
+          </section>
+
+          <!-- TAB: High-Seed / Trending Scraper Harvester -->
+          <section class="settings-section-card" id="tab-trending">
+            <div class="settings-card-header">
+              <div>
+                <h2>🔥 High-Seed Torrent Harvester</h2>
+                <p>Periodically crawl top and trending releases with verified high seed counts from native indexers.</p>
+              </div>
+              <button type="button" class="btn btn-primary" id="btn-harvest-now" style="display: flex; align-items: center; gap: 8px;">
+                <span id="harvest-btn-icon">🚀</span>
+                <span id="harvest-btn-text">Harvest Trending Now</span>
+              </button>
+            </div>
+
+            <!-- Harvester Live Dashboard Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px;">
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Harvester Status</div>
+                <div id="harvest-stat-status" style="font-size: 1.3rem; font-weight: 700; color: #4ade80; margin-top: 4px;">Active</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Last Qualified Ingest</div>
+                <div id="harvest-stat-last-count" style="font-size: 1.3rem; font-weight: 700; color: var(--accent-cyan); margin-top: 4px;">0 torrents</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Total Harvested</div>
+                <div id="harvest-stat-total" style="font-size: 1.3rem; font-weight: 700; color: #a78bfa; margin-top: 4px;">0</div>
+              </div>
+              <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 14px 16px; border-radius: var(--radius-sm);">
+                <div style="color: var(--text-muted); font-size: 0.78rem;">Last Harvest Run</div>
+                <div id="harvest-stat-last-run" style="font-size: 1rem; font-weight: 600; color: var(--text-bright); margin-top: 6px;">Never</div>
+              </div>
+            </div>
+
+            <!-- Harvester Controls -->
+            <div class="form-group" style="margin-bottom: 20px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                  <label for="cfg-trending-enabled" style="margin-bottom: 2px; font-weight: 600; font-size: 0.92rem;">Enable Automated Periodic Harvesting</label>
+                  <p class="field-desc">Periodically pulls top seeded movies, TV, anime, and popular torrents in the background.</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="cfg-trending-enabled" name="trending_enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+              <div class="form-group">
+                <label for="cfg-trending-interval-hours" style="font-weight: 600;">Harvest Interval (Hours)</label>
+                <input type="number" id="cfg-trending-interval-hours" name="trending_interval_hours" min="1" max="72" value="4" class="form-input">
+                <span class="field-desc">How often the background harvester queries enabled indexers (default: 4 hours).</span>
+              </div>
+              <div class="form-group">
+                <label for="cfg-trending-min-seeds" style="font-weight: 600;">Minimum Seed Threshold</label>
+                <input type="number" id="cfg-trending-min-seeds" name="trending_min_seeds" min="1" max="1000" value="5" class="form-input">
+                <span class="field-desc">Only torrents reporting at least this many seeders are saved (default: 5).</span>
+              </div>
+            </div>
+
+            <!-- Provider Selection Checkboxes -->
+            <div class="form-group">
+              <label style="font-weight: 600; margin-bottom: 6px;">Supported Scraper Providers</label>
+              <p class="field-desc" style="margin-bottom: 14px;">Toggle individual native indexer sources for the automated trending harvester.</p>
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px;" id="trending-providers-grid">
+                <!-- Dynamically populated provider checkboxes -->
+              </div>
             </div>
           </section>
 

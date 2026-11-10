@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Automated High-Seed / Trending Torrent Harvester**:
+  - Implemented `TrendingHarvester` engine in `internal/ingester` with scheduled background loop and manual UI trigger.
+  - Added `TrendingScraper` interface and `Trending()` support for native scrapers (The Pirate Bay Top 100, YTS top movies, EZTV airing shows, Nyaa/Sukebei popular RSS, TorrentDownloads).
+  - Minimum seed qualification threshold (configurable, default: >= 5 seeds) and anti-spam heuristics filter.
+  - Dedicated "Trending Harvester" management tab in Web UI Settings with live status metrics, interval/seed threshold controls, and provider toggles.
+  - REST API endpoints: `POST /api/v1/trending/harvest` and `GET /api/v1/trending/status`.
+
 ## [1.3.3] - 2026-11-05
 
 ### Added

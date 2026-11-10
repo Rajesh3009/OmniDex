@@ -46,6 +46,22 @@ type TorrentScraper = SourceScraper
 // ScraperInterface is an alias for SourceScraper for interface-based access.
 type ScraperInterface = SourceScraper
 
+// TrendingScraper is an optional interface that scrapers can implement to fetch
+// top, trending, or highest-seeded torrent releases without requiring an explicit search term.
+type TrendingScraper interface {
+	SourceScraper
+	Trending(ctx context.Context, opts ...Option) ([]Torrent, error)
+}
+
+// FetchTrending fetches trending releases from a scraper if it implements TrendingScraper,
+// or falls back to Search(ctx, "", opts...) if Trending is not explicitly implemented.
+func FetchTrending(ctx context.Context, s SourceScraper, opts ...Option) ([]Torrent, error) {
+	if ts, ok := s.(TrendingScraper); ok {
+		return ts.Trending(ctx, opts...)
+	}
+	return s.Search(ctx, "", opts...)
+}
+
 // Options defines configuration options for scraper search operations.
 type Options struct {
 	BaseURL    string

@@ -19,32 +19,36 @@ type FeedConfig struct {
 }
 
 type Config struct {
-	WebPort               int          `json:"web_port"`
-	WebBindAddr           string       `json:"web_bind_addr"`
-	DHTListenAddr         string       `json:"dht_listen_addr"`
-	DHTWorkers            int          `json:"dht_workers"`
-	MaxTorrentPeers       int          `json:"max_torrent_peers"`
-	DBPath                string       `json:"db_path"`
-	TorznabAPIKey         string       `json:"torznab_api_key"`
-	ProwlarrURL           string       `json:"prowlarr_url"`
-	ProwlarrAPIKey        string       `json:"prowlarr_api_key"`
-	MaxDownloadRate       int64        `json:"max_download_rate"`        // bytes/sec (0 = unlimited)
-	MaxUploadRate         int64        `json:"max_upload_rate"`          // bytes/sec (0 = unlimited)
-	MonthlyDataLimitBytes int64        `json:"monthly_data_limit_bytes"` // bytes/month (0 = unlimited)
-	ExternalFeeds         []FeedConfig `json:"external_feeds"`
-	AutoPruneDead         bool         `json:"auto_prune_dead"`
-	AutoPruneDays         int          `json:"auto_prune_days"`
-	ProwlarrAutoSyncMin   int          `json:"prowlarr_auto_sync_min"`
-	FilterEnabled         bool         `json:"filter_enabled"`
-	FilterCategoryMode    string       `json:"filter_category_mode"` // "allowlist" or "blocklist"
-	FilterCategories      []string     `json:"filter_categories"`
-	FilterKeywords        []string     `json:"filter_keywords"`
-	ScraperEnabled        bool         `json:"scraper_enabled"`
-	ScraperIntervalMin    int          `json:"scraper_interval_min"`
-	ScraperBatchSize      int          `json:"scraper_batch_size"`
-	ScraperTrackers       []string     `json:"scraper_trackers"`
-	ScraperAutoUpdateTrackers bool     `json:"scraper_auto_update_trackers"`
-	ScraperTrackersURL    string       `json:"scraper_trackers_url"`
+	WebPort                   int             `json:"web_port"`
+	WebBindAddr               string          `json:"web_bind_addr"`
+	DHTListenAddr             string          `json:"dht_listen_addr"`
+	DHTWorkers                int             `json:"dht_workers"`
+	MaxTorrentPeers           int             `json:"max_torrent_peers"`
+	DBPath                    string          `json:"db_path"`
+	TorznabAPIKey             string          `json:"torznab_api_key"`
+	ProwlarrURL               string          `json:"prowlarr_url"`
+	ProwlarrAPIKey            string          `json:"prowlarr_api_key"`
+	MaxDownloadRate           int64           `json:"max_download_rate"`        // bytes/sec (0 = unlimited)
+	MaxUploadRate             int64           `json:"max_upload_rate"`          // bytes/sec (0 = unlimited)
+	MonthlyDataLimitBytes     int64           `json:"monthly_data_limit_bytes"` // bytes/month (0 = unlimited)
+	ExternalFeeds             []FeedConfig    `json:"external_feeds"`
+	AutoPruneDead             bool            `json:"auto_prune_dead"`
+	AutoPruneDays             int             `json:"auto_prune_days"`
+	ProwlarrAutoSyncMin       int             `json:"prowlarr_auto_sync_min"`
+	FilterEnabled             bool            `json:"filter_enabled"`
+	FilterCategoryMode        string          `json:"filter_category_mode"` // "allowlist" or "blocklist"
+	FilterCategories          []string        `json:"filter_categories"`
+	FilterKeywords            []string        `json:"filter_keywords"`
+	ScraperEnabled            bool            `json:"scraper_enabled"`
+	ScraperIntervalMin        int             `json:"scraper_interval_min"`
+	ScraperBatchSize          int             `json:"scraper_batch_size"`
+	ScraperTrackers           []string        `json:"scraper_trackers"`
+	ScraperAutoUpdateTrackers bool            `json:"scraper_auto_update_trackers"`
+	ScraperTrackersURL        string          `json:"scraper_trackers_url"`
+	TrendingEnabled           bool            `json:"trending_enabled"`
+	TrendingIntervalHours     int             `json:"trending_interval_hours"`
+	TrendingMinSeeds          int             `json:"trending_min_seeds"`
+	TrendingProviders         map[string]bool `json:"trending_providers"`
 }
 
 func generateRandomKey() string {
@@ -125,6 +129,19 @@ func DefaultConfig() Config {
 		},
 		ScraperAutoUpdateTrackers: true,
 		ScraperTrackersURL:       "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt",
+		TrendingEnabled:          true,
+		TrendingIntervalHours:    4,
+		TrendingMinSeeds:         5,
+		TrendingProviders: map[string]bool{
+			"thepiratebay":     true,
+			"yts":              true,
+			"eztv":             true,
+			"nyaa":             true,
+			"torrentdownloads": true,
+			"oxtorrent":        false,
+			"audiobookbay":     false,
+			"sukebei":          false,
+		},
 	}
 }
 
@@ -156,6 +173,15 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.ScraperTrackersURL == "" {
 		cfg.ScraperTrackersURL = DefaultConfig().ScraperTrackersURL
+	}
+	if cfg.TrendingIntervalHours <= 0 {
+		cfg.TrendingIntervalHours = 4
+	}
+	if cfg.TrendingMinSeeds <= 0 {
+		cfg.TrendingMinSeeds = 5
+	}
+	if cfg.TrendingProviders == nil {
+		cfg.TrendingProviders = DefaultConfig().TrendingProviders
 	}
 	return cfg, nil
 }

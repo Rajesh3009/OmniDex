@@ -94,6 +94,55 @@ func (s *NyaaScraper) Search(ctx context.Context, query string, opts ...Option) 
 	return s.ParseHTML(resp.Body)
 }
 
+// Trending queries Nyaa's RSS feed sorted by seeders descending to retrieve top-seeded releases.
+func (s *NyaaScraper) Trending(ctx context.Context, opts ...Option) ([]Torrent, error) {
+	cfg := Options{
+		BaseURL:    s.baseURL,
+		HTTPClient: s.client,
+		Timeout:    15 * time.Second,
+		Limit:      50,
+		Page:       1,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+
+	params := url.Values{}
+	params.Set("page", "rss")
+	params.Set("s", "seeders")
+	params.Set("o", "desc")
+
+	endpoint := fmt.Sprintf("%s/?%s", strings.TrimRight(cfg.BaseURL, "/"), params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("nyaa: create trending request: %w", err)
+	}
+	req.Header.Set("User-Agent", "OmniDex/1.3 (compatible; ScraperBot/1.0)")
+	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml, */*")
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("nyaa: trending request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("nyaa: server returned status %d", resp.StatusCode)
+	}
+
+	torrents, err := s.ParseHTML(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Limit > 0 && len(torrents) > cfg.Limit {
+		return torrents[:cfg.Limit], nil
+	}
+	return torrents, nil
+}
+
 // ParseHTML parses raw RSS 2.0 XML or HTML table content from an io.Reader.
 func (s *NyaaScraper) ParseHTML(r io.Reader) ([]Torrent, error) {
 	return parseNyaaFeed(r, "Nyaa.si", s.baseURL, NyaaTrackers, mapNyaaCategory)

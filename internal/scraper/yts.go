@@ -70,6 +70,66 @@ func (s *YTSScraper) Search(ctx context.Context, query string, opts ...Option) (
 	return torrents, err
 }
 
+// Trending queries YTS movies sorted by seeds descending to retrieve the highest-seeded releases.
+func (s *YTSScraper) Trending(ctx context.Context, opts ...Option) ([]Torrent, error) {
+	cfg := Options{
+		BaseURL:    s.baseURL,
+		HTTPClient: s.client,
+		Timeout:    15 * time.Second,
+		Limit:      50,
+		Page:       1,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+
+	torrents, err := s.doTrending(ctx, cfg.BaseURL, cfg)
+	if err != nil && cfg.BaseURL == DefaultYTSBaseURL {
+		fallbackTorrents, fallbackErr := s.doTrending(ctx, FallbackYTSBaseURL, cfg)
+		if fallbackErr == nil {
+			return fallbackTorrents, nil
+		}
+	}
+	return torrents, err
+}
+
+func (s *YTSScraper) doTrending(ctx context.Context, baseURL string, cfg Options) ([]Torrent, error) {
+	limit := cfg.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	params := url.Values{}
+	params.Set("limit", strconv.Itoa(limit))
+	params.Set("sort_by", "seeds")
+	params.Set("order_by", "desc")
+	if cfg.Page > 1 {
+		params.Set("page", strconv.Itoa(cfg.Page))
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v2/list_movies.json?%s", strings.TrimRight(baseURL, "/"), params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("yts: create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "OmniDex/1.3 (compatible; ScraperBot/1.0)")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("yts: trending request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("yts: server returned status %d", resp.StatusCode)
+	}
+
+	return s.ParseHTML(resp.Body)
+}
+
 func (s *YTSScraper) doSearch(ctx context.Context, baseURL, query string, cfg Options) ([]Torrent, error) {
 	limit := cfg.Limit
 	if limit <= 0 || limit > 50 {

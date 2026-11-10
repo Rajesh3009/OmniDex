@@ -136,6 +136,54 @@ func (s *EZTVScraper) Search(ctx context.Context, query string, opts ...Option) 
 	return s.filterResults(torrents, cleanedQuery), nil
 }
 
+// Trending queries EZTV's torrents API without an IMDb filter to return the latest high-activity releases.
+func (s *EZTVScraper) Trending(ctx context.Context, opts ...Option) ([]Torrent, error) {
+	cfg := Options{
+		BaseURL:    s.baseURL,
+		HTTPClient: s.client,
+		Timeout:    15 * time.Second,
+		Limit:      100,
+		Page:       1,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+
+	limit := cfg.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	page := cfg.Page
+	if page < 1 {
+		page = 1
+	}
+
+	apiURL := fmt.Sprintf("%s/api/get-torrents?limit=%d&page=%d",
+		strings.TrimRight(cfg.BaseURL, "/"), limit, page)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("eztv: create trending request: %w", err)
+	}
+	req.Header.Set("User-Agent", "OmniDex/1.3 (compatible; ScraperBot/1.0)")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("eztv: trending request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("eztv: server returned status %d", resp.StatusCode)
+	}
+
+	return s.ParseHTML(resp.Body)
+}
+
 // lookupIMDbIDs queries the IMDb suggestion API and returns candidate numeric IMDb IDs.
 func (s *EZTVScraper) lookupIMDbIDs(ctx context.Context, client *http.Client, showTitle string) []string {
 	encoded := url.QueryEscape(strings.ToLower(showTitle))

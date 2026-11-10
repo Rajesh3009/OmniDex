@@ -12,15 +12,18 @@ document.addEventListener('DOMContentLoaded', () => {
   initRulesFilter();
   initJanitor();
   initKeyboardShortcuts();
+  initTrendingHarvester();
   
   loadConfig();
   loadFeedsList();
   loadScraperStats();
   loadJanitorStats();
+  loadTrendingStatus();
 
   // Periodically refresh stats
   setInterval(loadScraperStats, 10000);
   setInterval(loadJanitorStats, 5000);
+  setInterval(loadTrendingStatus, 15000);
 });
 
 // Tab Switching & Hash Deep Linking
@@ -55,6 +58,8 @@ function initTabs() {
       updateFilterPreview();
     } else if (tabId === 'tab-scraper') {
       loadScraperStats();
+    } else if (tabId === 'tab-trending') {
+      loadTrendingStatus();
     } else if (tabId === 'tab-maintenance') {
       loadJanitorStats();
     }
@@ -224,6 +229,18 @@ async function loadConfig() {
     const scraperTrackers = document.getElementById('cfg-scraper-trackers');
     if (scraperTrackers && cfg.scraper_trackers) scraperTrackers.value = cfg.scraper_trackers.join('\n');
 
+    const trendingEnabled = document.getElementById('cfg-trending-enabled');
+    if (trendingEnabled) trendingEnabled.checked = cfg.trending_enabled !== false;
+
+    const trendingHours = document.getElementById('cfg-trending-interval-hours');
+    if (trendingHours) trendingHours.value = cfg.trending_interval_hours || 4;
+
+    const trendingMinSeeds = document.getElementById('cfg-trending-min-seeds');
+    if (trendingMinSeeds) trendingMinSeeds.value = cfg.trending_min_seeds || 5;
+
+    renderTrendingProviders(cfg.trending_providers);
+    loadTrendingStatus();
+
     updateFilterPreview();
   } catch (err) {
     console.error('Config fetch error:', err);
@@ -245,7 +262,16 @@ async function saveConfig() {
   const rawKeywords = document.getElementById('cfg-filter-keywords')?.value || '';
   const filterKeywords = rawKeywords.split(',').map(s => s.trim()).filter(s => s.length > 0);
 
+  const trendingProviders = {};
+  document.querySelectorAll('.trending-provider-check').forEach(cb => {
+    trendingProviders[cb.dataset.provider] = cb.checked;
+  });
+
   const payload = {
+    trending_enabled: document.getElementById('cfg-trending-enabled')?.checked || false,
+    trending_interval_hours: parseInt(document.getElementById('cfg-trending-interval-hours')?.value, 10) || 4,
+    trending_min_seeds: parseInt(document.getElementById('cfg-trending-min-seeds')?.value, 10) || 5,
+    trending_providers: trendingProviders,
     prowlarr_url: document.getElementById('cfg-prowlarr-url')?.value?.trim() || '',
     prowlarr_api_key: document.getElementById('cfg-prowlarr-key')?.value?.trim() || '',
     torznab_api_key: document.getElementById('cfg-torznab-key')?.value?.trim() || '',
@@ -824,3 +850,115 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+
+
+// Trending Harvester Client Logic
+const HARVESTER_PROVIDERS = [
+  { id: 'thepiratebay', name: 'The Pirate Bay (Apibay)', desc: 'Top 100 recent/all categories', default: true },
+  { id: 'yts', name: 'YTS (Movies)', desc: 'Top-seeded 720p/1080p/4K releases', default: true },
+  { id: 'eztv', name: 'EZTV (TV Shows)', desc: 'Latest airing TV episodes', default: true },
+  { id: 'nyaa', name: 'Nyaa (Anime & Media)', desc: 'Top-seeded anime releases', default: true },
+  { id: 'torrentdownloads', name: 'TorrentDownloads', desc: 'Daily popular releases & general media', default: true },
+  { id: 'oxtorrent', name: 'OxTorrent (French/EU)', desc: 'European movies and series', default: false },
+  { id: 'audiobookbay', name: 'AudioBookBay', desc: 'Popular audiobooks and audio series', default: false },
+  { id: 'sukebei', name: 'Sukebei', desc: 'Adult anime and media', default: false }
+];
+
+function renderTrendingProviders(providersConfig) {
+  const container = document.getElementById('trending-providers-grid');
+  if (!container) return;
+
+  const conf = providersConfig || {};
+  container.innerHTML = HARVESTER_PROVIDERS.map(p => {
+    const isChecked = conf[p.id] !== undefined ? !!conf[p.id] : p.default;
+    return `
+      <label class="provider-card" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.02); cursor: pointer;">
+        <input type="checkbox" class="trending-provider-check" data-provider="${p.id}" ${isChecked ? 'checked' : ''} style="margin-top: 3px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">${escapeHtml(p.name)}</div>
+          <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">${escapeHtml(p.desc)}</div>
+        </div>
+      </label>
+    `;
+  }).join('');
+}
+
+async function loadTrendingStatus() {
+  try {
+    const res = await fetch('/api/v1/trending/status');
+    if (!res.ok) return;
+    const stats = await res.json();
+
+    const statusEl = document.getElementById('harvest-stat-status');
+    if (statusEl) {
+      if (stats.is_harvesting) {
+        statusEl.textContent = 'Harvesting...';
+        statusEl.style.color = '#38bdf8';
+      } else if (stats.running) {
+        statusEl.textContent = 'Active';
+        statusEl.style.color = '#4ade80';
+      } else {
+        statusEl.textContent = 'Disabled';
+        statusEl.style.color = 'var(--text-dim)';
+      }
+    }
+
+    const lastCountEl = document.getElementById('harvest-stat-last-count');
+    if (lastCountEl) {
+      lastCountEl.textContent = `${stats.last_count || 0} torrents`;
+    }
+
+    const totalEl = document.getElementById('harvest-stat-total');
+    if (totalEl) {
+      totalEl.textContent = stats.total_harvested || 0;
+    }
+
+    const lastRunEl = document.getElementById('harvest-stat-last-run');
+    if (lastRunEl) {
+      if (stats.last_run && !stats.last_run.startsWith('0001')) {
+        const d = new Date(stats.last_run);
+        lastRunEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        lastRunEl.title = d.toLocaleString();
+      } else {
+        lastRunEl.textContent = 'Never';
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load trending status:', err);
+  }
+}
+
+function initTrendingHarvester() {
+  const btnHarvest = document.getElementById('btn-harvest-now');
+  if (!btnHarvest) return;
+
+  btnHarvest.addEventListener('click', async () => {
+    const icon = document.getElementById('harvest-btn-icon');
+    const text = document.getElementById('harvest-btn-text');
+    const origText = text ? text.textContent : 'Harvest Trending Now';
+
+    if (icon) icon.textContent = '⏳';
+    if (text) text.textContent = 'Harvesting...';
+    btnHarvest.disabled = true;
+
+    try {
+      const res = await fetch('/api/v1/trending/harvest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || `Harvest complete: ${data.count} high-seed torrents ingested!`, 'success');
+      } else {
+        showToast(data.error || 'Harvest failed', 'error');
+      }
+      loadTrendingStatus();
+    } catch (err) {
+      showToast('Error triggering harvest: ' + err.message, 'error');
+    } finally {
+      if (icon) icon.textContent = '🚀';
+      if (text) text.textContent = origText;
+      btnHarvest.disabled = false;
+    }
+  });
+}

@@ -43,6 +43,8 @@ type Server struct {
 	feedGen  *feed.Generator
 	ingester *ingester.Ingester
 	scraper  *scraper.Scraper
+	registry *scraper.Registry
+	trending *ingester.TrendingHarvester
 }
 
 func main() {
@@ -100,6 +102,12 @@ func main() {
 	trackerScraper.Start()
 	defer trackerScraper.Stop()
 
+	// Initialize Native Scraper Registry and Trending Harvester
+	scraperReg := scraper.DefaultRegistry()
+	trendingHarvester := ingester.NewTrendingHarvester(cfg, store, scraperReg, trackerScraper)
+	trendingHarvester.Start()
+	defer trendingHarvester.Stop()
+
 	srv := &Server{
 		cfg:      cfg,
 		cfgPath:  cfgPath,
@@ -110,6 +118,8 @@ func main() {
 		feedGen:  feedGen,
 		ingester: feedIngester,
 		scraper:  trackerScraper,
+		registry: scraperReg,
+		trending: trendingHarvester,
 	}
 
 	if crawler != nil {
@@ -160,6 +170,8 @@ func main() {
 	// Tracker Scraper endpoints
 	mux.HandleFunc("/api/v1/torrent/scrape", srv.handleScrapeTorrent)
 	mux.HandleFunc("/api/v1/scraper/status", srv.handleScraperStatus)
+	mux.HandleFunc("/api/v1/trending/harvest", srv.handleTrendingHarvest)
+	mux.HandleFunc("/api/v1/trending/status", srv.handleTrendingStatus)
 
 	// RSS 2.0 & Atom Feed Endpoints
 	mux.HandleFunc("/api/v1/feed/rss", srv.feedGen.HandleRSS)
@@ -637,6 +649,47 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(resMap)
+}
+
+func (s *Server) handleTrendingHarvest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	count, err := s.trending.Harvest(ctx)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+			"count": count,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Successfully harvested %d qualified high-seed torrents", count),
+		"count":   count,
+		"stats":   s.trending.Stats(),
+	})
+}
+
+func (s *Server) handleTrendingStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if s.trending == nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"running": false,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(s.trending.Stats())
 }
 
 func (s *Server) handleScraperStatus(w http.ResponseWriter, r *http.Request) {

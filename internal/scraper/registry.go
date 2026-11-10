@@ -140,3 +140,74 @@ func (r *Registry) SearchAll(ctx context.Context, query string, opts ...Option) 
 
 	return aggregated, nil
 }
+
+// TrendingAll queries all registered scrapers for their trending releases concurrently.
+func (r *Registry) TrendingAll(ctx context.Context, opts ...Option) ([]Torrent, error) {
+	return r.TrendingScrapers(ctx, nil, opts...)
+}
+
+// TrendingScrapers queries the specified enabled scrapers (or all if filter is nil/empty) for trending releases.
+func (r *Registry) TrendingScrapers(ctx context.Context, enabledNames map[string]bool, opts ...Option) ([]Torrent, error) {
+	scrapers := r.All()
+	if len(scrapers) == 0 {
+		return []Torrent{}, nil
+	}
+
+	var active []SourceScraper
+	for _, s := range scrapers {
+		if enabledNames != nil && len(enabledNames) > 0 {
+			key := strings.ToLower(strings.ReplaceAll(s.Name(), " ", ""))
+			key = strings.ReplaceAll(key, ".", "")
+			if !enabledNames[key] && !enabledNames[strings.ToLower(s.Name())] {
+				continue
+			}
+		}
+		active = append(active, s)
+	}
+
+	if len(active) == 0 {
+		return []Torrent{}, nil
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var aggregated []Torrent
+	var errs []string
+
+	for _, s := range active {
+		wg.Add(1)
+		go func(scraper SourceScraper) {
+			defer wg.Done()
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			torrents, err := FetchTrending(ctx, scraper, opts...)
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", scraper.Name(), err))
+				return
+			}
+			if len(torrents) > 0 {
+				aggregated = append(aggregated, torrents...)
+			}
+		}(s)
+	}
+
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		return aggregated, ctx.Err()
+	}
+
+	if len(aggregated) == 0 && len(errs) == len(active) {
+		return nil, fmt.Errorf("all scrapers failed trending fetch: %s", strings.Join(errs, "; "))
+	}
+
+	return aggregated, nil
+}

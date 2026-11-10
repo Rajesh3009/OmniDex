@@ -10,5 +10,18 @@
   "prowlarr_api_key": "",
   "max_download_rate": 0,
   "max_upload_rate": 0,
-  "monthly_data_limit_bytes": 0
+  "monthly_data_limit_bytes": 0,
+  "trending_enabled": true,
+  "trending_interval_hours": 4,
+  "trending_min_seeds": 5,
+  "trending_providers": {
+    "thepiratebay": true,
+    "yts": true,
+    "eztv": true,
+    "nyaa": true,
+    "torrentdownloads": true,
+    "oxtorrent": false,
+    "audiobookbay": false,
+    "sukebei": false
+  }
 }
