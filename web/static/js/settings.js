@@ -540,12 +540,13 @@ async function loadScraperStats() {
     };
 
     setEl('scraper-stat-total', stats.total_scraped || 0);
-    setEl('scraper-stat-success', stats.successful_scrapes || 0);
+    setEl('scraper-stat-success', stats.successful ?? stats.successful_scrapes ?? 0);
     setEl('scraper-stat-trackers', stats.active_trackers || 0);
 
     const badge = document.getElementById('scraper-live-status-badge');
     if (badge) {
-      if (stats.enabled) {
+      const isRunning = stats.running ?? stats.enabled ?? false;
+      if (isRunning) {
         badge.textContent = 'Active';
         badge.style.background = 'rgba(34, 197, 94, 0.2)';
         badge.style.color = '#4ade80';

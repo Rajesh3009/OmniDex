@@ -714,7 +714,16 @@ func (s *Server) handleScraperStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := s.scraper.Stats()
-	_ = json.NewEncoder(w).Encode(stats)
+	resp := map[string]any{
+		"total_scraped":   stats.TotalScraped,
+		"successful":      stats.Successful,
+		"failed":          stats.Failed,
+		"last_scrape_time": stats.LastScrapeTime,
+		"active_trackers": stats.ActiveTrackers,
+		"running":         stats.Running,
+		"enabled":         s.cfg.ScraperEnabled,
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handlePruneTorrents(w http.ResponseWriter, r *http.Request) {
