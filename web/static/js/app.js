@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initStatsToggle();
   loadStats();
   loadConfig();
+  loadSources();
   performSearch();
   checkUrlHash();
 
@@ -714,6 +715,88 @@ function initEventListeners() {
       showToast('Error updating config: ' + err.message, 'error');
     }
   });
+}
+
+function setSourceFilter(source) {
+  filterState.source = source;
+  filterState.page = 1;
+  const select = document.getElementById("filter-source");
+  if (select) {
+    let opt = select.querySelector(`option[value="${source}"]`);
+    if (!opt) {
+      opt = document.createElement("option");
+      opt.value = source;
+      opt.textContent = source;
+      select.appendChild(opt);
+    }
+    select.value = source;
+  }
+  performSearch();
+}
+
+async function loadSources() {
+  try {
+    const res = await fetch("/api/v1/sources");
+    if (!res.ok) return;
+    const sources = await res.json();
+    if (!Array.isArray(sources)) return;
+
+    populateSourceSelect("filter-source", "filter-source-trending-group", "filter-source-feeds-group", sources);
+    populateSourceSelect("prune-source-select", "prune-source-trending-group", "prune-source-feeds-group", sources);
+  } catch (err) {
+    console.warn("Failed to load sources list:", err);
+  }
+}
+
+function populateSourceSelect(selectId, trendingGroupId, feedsGroupId, sources) {
+  const select = document.getElementById(selectId);
+  const trendingGroup = document.getElementById(trendingGroupId);
+  const feedsGroup = document.getElementById(feedsGroupId);
+  if (!select) return;
+
+  const trendingSources = [];
+  const feedSources = [];
+
+  sources.forEach(src => {
+    const str = String(src).trim();
+    if (!str) return;
+    const lower = str.toLowerCase();
+    if (lower === "dht" || lower === "prowlarr" || lower === "manual" || lower === "all") {
+      return;
+    }
+    if (lower.startsWith("trending:")) {
+      trendingSources.push(str);
+    } else {
+      feedSources.push(str);
+    }
+  });
+
+  if (trendingGroup) {
+    trendingGroup.innerHTML = "";
+    trendingSources.forEach(src => {
+      const provider = src.replace(/^trending:/i, "");
+      const opt = document.createElement("option");
+      opt.value = src;
+      opt.textContent = `Trending: ${provider.toUpperCase()}`;
+      trendingGroup.appendChild(opt);
+    });
+    trendingGroup.style.display = trendingSources.length > 0 ? "" : "none";
+  }
+
+  if (feedsGroup) {
+    feedsGroup.innerHTML = "";
+    feedSources.forEach(src => {
+      const opt = document.createElement("option");
+      opt.value = src;
+      opt.textContent = `Feed: ${src}`;
+      feedsGroup.appendChild(opt);
+    });
+    feedsGroup.style.display = feedSources.length > 0 ? "" : "none";
+  }
+
+  if (selectId === "filter-source" && filterState.source) {
+    select.value = filterState.source;
+  }
 }
 
 function setCategoryFilter(category) {
@@ -1528,13 +1611,16 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     tr.style.display = 'none'; // Initially collapsed
   }
 
-  let sourceBadge = '<span class="badge badge-dht">DHT Wire</span>';
+  let sourceBadge = `<span class="badge badge-dht btn-filter-source" style="cursor: pointer;" data-source="dht" title="Filter by DHT Wire">DHT Wire</span>`;
   if (item.source === 'prowlarr') {
-    sourceBadge = '<span class="badge badge-prowlarr">Prowlarr</span>';
+    sourceBadge = `<span class="badge badge-prowlarr btn-filter-source" style="cursor: pointer;" data-source="prowlarr" title="Filter by Prowlarr">Prowlarr</span>`;
   } else if (item.source === 'manual') {
-    sourceBadge = '<span class="badge" style="color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3);">Manual</span>';
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); cursor: pointer;" data-source="manual" title="Filter by Manual">Manual</span>`;
+  } else if (item.source && item.source.startsWith('trending:')) {
+    const prov = item.source.replace(/^trending:/i, '').toUpperCase();
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #ec4899; background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.3); cursor: pointer;" data-source="${escapeHtml(item.source)}" title="Filter by ${escapeHtml(item.source)}">⚡ ${escapeHtml(prov)}</span>`;
   } else if (item.source && item.source !== 'dht') {
-    sourceBadge = `<span class="badge" style="color: #fb923c; background: rgba(251, 146, 60, 0.15); border: 1px solid rgba(251, 146, 60, 0.3);" title="Source: ${escapeHtml(item.source)}">${escapeHtml(item.source)}</span>`;
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #fb923c; background: rgba(251, 146, 60, 0.15); border: 1px solid rgba(251, 146, 60, 0.3); cursor: pointer;" data-source="${escapeHtml(item.source)}" title="Filter by ${escapeHtml(item.source)}">${escapeHtml(item.source)}</span>`;
   }
 
   const magnet = item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`;
@@ -1672,7 +1758,10 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   tr.querySelectorAll('.btn-row-files').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); showFiles(parseInt(el.dataset.index, 10)); });
   });
-  tr.querySelectorAll('.btn-filter-cat').forEach(el => {
+  tr.querySelectorAll('.btn-filter-source').forEach(el => {
+      el.addEventListener('click', (e) => { e.stopPropagation(); setSourceFilter(el.dataset.source); });
+    });
+    tr.querySelectorAll('.btn-filter-cat').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); setCategoryFilter(el.dataset.cat); });
   });
   tr.querySelectorAll('.btn-filter-tag').forEach(el => {

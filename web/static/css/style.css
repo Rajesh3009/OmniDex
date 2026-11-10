@@ -485,9 +485,18 @@ body {
   padding-right: 4px;
 }
 
-.custom-select option {
+.custom-select option,
+.custom-select optgroup {
   background: #0f172a;
   color: #fff;
+}
+
+.custom-select optgroup {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--accent-cyan, #06b6d4);
+  background: #090d16;
+  padding: 4px 0;
 }
 
 .filter-actions {

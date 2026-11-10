@@ -166,8 +166,15 @@
             <label for="filter-source" class="control-label">Source:</label>
             <select id="filter-source" class="custom-select">
               <option value="all">All Sources</option>
-              <option value="dht">DHT Wire Only</option>
-              <option value="prowlarr">Prowlarr Only</option>
+              <optgroup label="Core Types">
+                <option value="dht">DHT Wire Only</option>
+                <option value="trending">Trending (All Providers)</option>
+                <option value="prowlarr">Prowlarr Only</option>
+                <option value="feeds">External RSS Feeds (All)</option>
+                <option value="manual">Manual Imports Only</option>
+              </optgroup>
+              <optgroup id="filter-source-trending-group" label="Trending Providers" style="display: none;"></optgroup>
+              <optgroup id="filter-source-feeds-group" label="Individual Feeds" style="display: none;"></optgroup>
             </select>
           </div>
 
@@ -213,7 +220,7 @@
           <!-- Quality / Source Selector -->
           <div class="control-box">
             <span class="control-icon">✨</span>
-            <label for="filter-quality" class="control-label">Source:</label>
+            <label for="filter-quality" class="control-label">Quality:</label>
             <select id="filter-quality" class="custom-select">
               <option value="all">All Quality</option>
               <option value="BluRay">BluRay</option>
@@ -480,9 +487,16 @@
           <div class="form-group">
             <label for="prune-source-select">Source Scope</label>
             <select id="prune-source-select" class="custom-select" style="width: 100%;">
-              <option value="all" selected>All Sources (DHT, Prowlarr, Feeds)</option>
-              <option value="dht">DHT Crawled Torrents Only</option>
-              <option value="prowlarr">Prowlarr Only</option>
+              <option value="all" selected>All Sources (DHT, Prowlarr, Trending, Feeds)</option>
+              <optgroup label="Core Types">
+                <option value="dht">DHT Crawled Torrents Only</option>
+                <option value="trending">Trending Torrents (All Providers)</option>
+                <option value="prowlarr">Prowlarr Only</option>
+                <option value="feeds">External RSS Feeds (All)</option>
+                <option value="manual">Manual Imports Only</option>
+              </optgroup>
+              <optgroup id="prune-source-trending-group" label="Trending Providers" style="display: none;"></optgroup>
+              <optgroup id="prune-source-feeds-group" label="Individual Feeds" style="display: none;"></optgroup>
             </select>
           </div>
 

@@ -212,6 +212,7 @@ func main() {
 	mux.HandleFunc("/api/v1/prowlarr/search", srv.handleProwlarrSearch)
 	mux.HandleFunc("/api/v1/stats", srv.handleStats)
 	mux.HandleFunc("/api/v1/categories", srv.handleCategories)
+	mux.HandleFunc("/api/v1/sources", srv.handleSources)
 	mux.HandleFunc("/api/v1/config", srv.handleConfig)
 
 	// Static UI assets: preferentially serve from local disk if web/static exists for instant hot reloading without rebuild
@@ -399,6 +400,16 @@ func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(cats)
+}
+
+func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
+	sources, err := s.store.GetSources()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(sources)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

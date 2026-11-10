@@ -412,6 +412,33 @@ func buildOrderBy(sortBy string, hasFTS bool) string {
 	}
 }
 
+// buildSourceCondition constructs the SQL where clause and arguments for source filtering
+func buildSourceCondition(colPrefix, sourceVal string) (string, []any) {
+	s := strings.ToLower(strings.TrimSpace(sourceVal))
+	if s == "" || s == "all" {
+		return "", nil
+	}
+	col := "source"
+	if colPrefix != "" {
+		col = colPrefix + ".source"
+	}
+
+	switch s {
+	case "dht":
+		return col + " = ?", []any{"dht"}
+	case "prowlarr":
+		return col + " = ?", []any{"prowlarr"}
+	case "manual":
+		return col + " = ?", []any{"manual"}
+	case "trending":
+		return "(" + col + " LIKE 'trending:%' OR " + col + " = 'trending')", nil
+	case "feed", "feeds":
+		return "(" + col + " = 'feed' OR (" + col + " NOT IN ('dht', 'prowlarr', 'manual') AND " + col + " NOT LIKE 'trending:%'))", nil
+	default:
+		return col + " = ?", []any{s}
+	}
+}
+
 func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
@@ -435,9 +462,9 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		whereClauses = append(whereClauses, "category = ?")
 		args = append(args, filter.Category)
 	}
-	if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
-		whereClauses = append(whereClauses, "source = ?")
-		args = append(args, strings.ToLower(filter.Source))
+	if clause, sArgs := buildSourceCondition("", filter.Source); clause != "" {
+		whereClauses = append(whereClauses, clause)
+		args = append(args, sArgs...)
 	}
 	if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
 		whereClauses = append(whereClauses, "resolution = ?")
@@ -542,9 +569,9 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 		ftsWhereClauses = append(ftsWhereClauses, "t.category = ?")
 		ftsArgs = append(ftsArgs, filter.Category)
 	}
-	if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
-		ftsWhereClauses = append(ftsWhereClauses, "t.source = ?")
-		ftsArgs = append(ftsArgs, strings.ToLower(filter.Source))
+	if clause, sArgs := buildSourceCondition("t", filter.Source); clause != "" {
+		ftsWhereClauses = append(ftsWhereClauses, clause)
+		ftsArgs = append(ftsArgs, sArgs...)
 	}
 	if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
 		ftsWhereClauses = append(ftsWhereClauses, "t.resolution = ?")
@@ -589,9 +616,9 @@ func (s *Store) SearchWithFilter(filter SearchFilter) ([]TorrentRecord, int64, e
 			fallbackWhere = append(fallbackWhere, "category = ?")
 			fallbackArgs = append(fallbackArgs, filter.Category)
 		}
-		if filter.Source != "" && !strings.EqualFold(filter.Source, "all") {
-			fallbackWhere = append(fallbackWhere, "source = ?")
-			fallbackArgs = append(fallbackArgs, strings.ToLower(filter.Source))
+		if clause, sArgs := buildSourceCondition("", filter.Source); clause != "" {
+			fallbackWhere = append(fallbackWhere, clause)
+			fallbackArgs = append(fallbackArgs, sArgs...)
 		}
 		if filter.Resolution != "" && !strings.EqualFold(filter.Resolution, "all") {
 			fallbackWhere = append(fallbackWhere, "resolution = ?")
@@ -812,6 +839,22 @@ func (s *Store) GetCategories() ([]string, error) {
 	return cats, nil
 }
 
+func (s *Store) GetSources() ([]string, error) {
+	rows, err := s.db.Query("SELECT DISTINCT source FROM torrents WHERE source != '' ORDER BY source ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sources []string
+	for rows.Next() {
+		var src string
+		if err := rows.Scan(&src); err == nil && src != "" {
+			sources = append(sources, src)
+		}
+	}
+	return sources, nil
+}
+
 func (s *Store) GetTorrentByHash(hash string) (*TorrentRecord, error) {
 	cleanHash := strings.ToLower(strings.TrimSpace(hash))
 	row := s.db.QueryRow(`
@@ -924,9 +967,9 @@ func (s *Store) PruneTorrents(opts PruneOptions) (int64, error) {
 		args = append(args, opts.OlderThan.Format("2006-01-02 15:04:05"))
 	}
 
-	if opts.Source != "" && !strings.EqualFold(opts.Source, "all") {
-		where = append(where, "source = ?")
-		args = append(args, strings.ToLower(opts.Source))
+	if clause, sArgs := buildSourceCondition("", opts.Source); clause != "" {
+		where = append(where, clause)
+		args = append(args, sArgs...)
 	}
 
 	query := "DELETE FROM torrents"
