@@ -13,12 +13,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initJanitor();
   initKeyboardShortcuts();
   initTrendingHarvester();
+  initDownloadClients();
   
   loadConfig();
   loadFeedsList();
   loadScraperStats();
   loadJanitorStats();
   loadTrendingStatus();
+  loadDownloadClients();
 
   // Periodically refresh stats
   setInterval(loadScraperStats, 10000);
@@ -60,6 +62,8 @@ function initTabs() {
       loadScraperStats();
     } else if (tabId === 'tab-trending') {
       loadTrendingStatus();
+    } else if (tabId === 'tab-clients') {
+      loadDownloadClients();
     } else if (tabId === 'tab-maintenance') {
       loadJanitorStats();
     }
@@ -304,6 +308,7 @@ async function saveConfig() {
     });
     if (resp.ok) {
       if (statusIndicator) statusIndicator.textContent = `Saved at ${new Date().toLocaleTimeString()}`;
+      await saveDownloadClients();
       showToast('Settings saved successfully', 'success');
       loadConfig();
     } else {
@@ -962,4 +967,272 @@ function initTrendingHarvester() {
       btnHarvest.disabled = false;
     }
   });
+}
+
+// --- Download Clients Management ---
+
+let currentClients = [];
+
+function initDownloadClients() {
+  const btnAdd = document.getElementById('btn-add-client');
+  if (btnAdd) {
+    btnAdd.addEventListener('click', () => {
+      const newClient = {
+        id: 'client_' + Date.now().toString(36),
+        name: 'My qBittorrent',
+        type: 'qbittorrent',
+        host: 'http://localhost:8080',
+        username: 'admin',
+        password: '',
+        save_path: '',
+        category: '',
+        auto_start: true,
+        is_default: currentClients.length === 0,
+        enabled: true
+      };
+      currentClients.push(newClient);
+      renderDownloadClientsList(currentClients);
+    });
+  }
+}
+
+async function loadDownloadClients() {
+  try {
+    const res = await fetch('/api/v1/clients');
+    if (!res.ok) return;
+    const clients = await res.json();
+    currentClients = clients || [];
+    renderDownloadClientsList(currentClients);
+  } catch (err) {
+    console.error('Error loading download clients:', err);
+  }
+}
+
+function renderDownloadClientsList(clients) {
+  const container = document.getElementById('clients-list-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!clients || clients.length === 0) {
+    container.innerHTML = `
+      <div style="background: rgba(0,0,0,0.25); border: 1px dashed var(--border-color); border-radius: var(--radius-sm); padding: 28px; text-align: center;">
+        <span style="font-size: 2rem; display: block; margin-bottom: 8px;">🚀</span>
+        <h4 style="color: #fff; margin: 0 0 6px 0;">No Download Clients Configured</h4>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 16px 0;">
+          Connect your local or remote qBittorrent, Transmission, or Deluge instance to send torrents with a single click.
+        </p>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('btn-add-client').click()">
+          Add First Client
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  clients.forEach((c, idx) => {
+    const card = document.createElement('div');
+    card.style.background = 'rgba(0,0,0,0.3)';
+    card.style.border = '1px solid var(--border-color)';
+    card.style.borderRadius = 'var(--radius-sm)';
+    card.style.padding = '18px';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.gap = '14px';
+
+    card.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" class="client-enable-toggle" data-idx="${idx}" ${c.enabled ? 'checked' : ''} style="accent-color: var(--accent-cyan); width: 17px; height: 17px; cursor: pointer;" title="Enable/Disable Client">
+          <input type="text" class="form-input client-name-input" data-idx="${idx}" value="${escapeHtml(c.name)}" style="font-weight: 600; width: 220px;" placeholder="Client Name">
+          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">${c.type.toUpperCase()}</span>
+          ${c.is_default ? '<span class="badge badge-dht">DEFAULT</span>' : ''}
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="btn btn-secondary btn-test-client" data-idx="${idx}" style="font-size: 0.8rem; padding: 5px 12px;">
+            🔌 Test Connection
+          </button>
+          <button type="button" class="btn btn-secondary btn-default-client" data-idx="${idx}" style="font-size: 0.8rem; padding: 5px 10px;" title="Set as default client">
+            ${c.is_default ? '★ Default' : '☆ Make Default'}
+          </button>
+          <button type="button" class="btn btn-delete-client" data-idx="${idx}" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; font-size: 0.8rem; padding: 5px 10px;" title="Remove client">
+            🗑️
+          </button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Client Type</label>
+          <select class="custom-select client-type-select" data-idx="${idx}" style="width: 100%;">
+            <option value="qbittorrent" ${c.type === 'qbittorrent' ? 'selected' : ''}>qBittorrent (Web API v2)</option>
+            <option value="transmission" ${c.type === 'transmission' ? 'selected' : ''}>Transmission (RPC)</option>
+            <option value="deluge" ${c.type === 'deluge' ? 'selected' : ''}>Deluge (Web JSON-RPC)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Host URL (with port)</label>
+          <input type="text" class="form-input client-host-input" data-idx="${idx}" value="${escapeHtml(c.host)}" placeholder="http://localhost:8080">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Username</label>
+          <input type="text" class="form-input client-user-input" data-idx="${idx}" value="${escapeHtml(c.username || '')}" placeholder="admin">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Password / Token</label>
+          <input type="password" class="form-input client-pass-input" data-idx="${idx}" value="${escapeHtml(c.password || '')}" placeholder="••••••••">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Default Save Path (Optional)</label>
+          <input type="text" class="form-input client-path-input" data-idx="${idx}" value="${escapeHtml(c.save_path || '')}" placeholder="/downloads">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.78rem;">Default Category (Optional)</label>
+          <input type="text" class="form-input client-cat-input" data-idx="${idx}" value="${escapeHtml(c.category || '')}" placeholder="Movies">
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: var(--text-dim); margin-top: 4px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" class="client-autostart-check" data-idx="${idx}" ${c.auto_start !== false ? 'checked' : ''} style="accent-color: var(--accent-cyan); cursor: pointer;">
+          <span>Start torrent download immediately (unchecked = add paused)</span>
+        </label>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+
+  // Attach event handlers
+  container.querySelectorAll('.client-enable-toggle').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].enabled = el.checked;
+    });
+  });
+
+  container.querySelectorAll('.client-name-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].name = el.value.trim();
+    });
+  });
+
+  container.querySelectorAll('.client-type-select').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].type = el.value;
+      renderDownloadClientsList(currentClients);
+    });
+  });
+
+  container.querySelectorAll('.client-host-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].host = el.value.trim();
+    });
+  });
+
+  container.querySelectorAll('.client-user-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].username = el.value.trim();
+    });
+  });
+
+  container.querySelectorAll('.client-pass-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].password = el.value;
+    });
+  });
+
+  container.querySelectorAll('.client-path-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].save_path = el.value.trim();
+    });
+  });
+
+  container.querySelectorAll('.client-cat-input').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].category = el.value.trim();
+    });
+  });
+
+  container.querySelectorAll('.client-autostart-check').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients[idx].auto_start = el.checked;
+    });
+  });
+
+  container.querySelectorAll('.btn-default-client').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients.forEach((cl, i) => cl.is_default = (i === idx));
+      renderDownloadClientsList(currentClients);
+    });
+  });
+
+  container.querySelectorAll('.btn-delete-client').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      currentClients.splice(idx, 1);
+      if (currentClients.length > 0 && !currentClients.some(c => c.is_default)) {
+        currentClients[0].is_default = true;
+      }
+      renderDownloadClientsList(currentClients);
+    });
+  });
+
+  container.querySelectorAll('.btn-test-client').forEach(el => {
+    el.addEventListener('click', async (e) => {
+      const idx = parseInt(el.dataset.idx, 10);
+      const c = currentClients[idx];
+      el.disabled = true;
+      const origText = el.textContent;
+      el.textContent = '⏳ Testing...';
+
+      try {
+        const res = await fetch('/api/v1/clients/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(c)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(data.message || `Connected to ${c.name} successfully!`, 'success');
+        } else {
+          showToast(`Connection test failed: ${data.error || 'Server error'}`, 'error');
+        }
+      } catch (err) {
+        showToast(`Test failed: ${err.message}`, 'error');
+      } finally {
+        el.disabled = false;
+        el.textContent = origText;
+      }
+    });
+  });
+}
+
+async function saveDownloadClients() {
+  try {
+    const res = await fetch('/api/v1/clients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentClients)
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      showToast('Failed to save download clients: ' + err, 'error');
+    }
+  } catch (err) {
+    console.error('Error saving download clients:', err);
+  }
 }

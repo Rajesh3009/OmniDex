@@ -47,8 +47,9 @@ type Config struct {
 	ScraperTrackersURL        string          `json:"scraper_trackers_url"`
 	TrendingEnabled           bool            `json:"trending_enabled"`
 	TrendingIntervalHours     int             `json:"trending_interval_hours"`
-	TrendingMinSeeds          int             `json:"trending_min_seeds"`
-	TrendingProviders         map[string]bool `json:"trending_providers"`
+	TrendingMinSeeds          int                    `json:"trending_min_seeds"`
+	TrendingProviders         map[string]bool        `json:"trending_providers"`
+	DownloadClients           []DownloadClientConfig `json:"download_clients"`
 }
 
 func generateRandomKey() string {

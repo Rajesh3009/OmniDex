@@ -19,6 +19,7 @@ import (
 
 	"local-indexer/internal/config"
 	"local-indexer/internal/db"
+	"local-indexer/internal/downloader"
 	"local-indexer/internal/dhtcrawler"
 	"local-indexer/internal/feed"
 	"local-indexer/internal/ingester"
@@ -45,6 +46,7 @@ type Server struct {
 	scraper  *scraper.Scraper
 	registry *scraper.Registry
 	trending *ingester.TrendingHarvester
+	downloader *downloader.Manager
 }
 
 func main() {
@@ -108,18 +110,21 @@ func main() {
 	trendingHarvester.Start()
 	defer trendingHarvester.Stop()
 
+	downloadMgr := downloader.NewManager(cfg.DownloadClients)
+
 	srv := &Server{
-		cfg:      cfg,
-		cfgPath:  cfgPath,
-		store:    store,
-		crawler:  crawler,
-		torznab:  torznabServer,
-		prowl:    prowlClient,
-		feedGen:  feedGen,
-		ingester: feedIngester,
-		scraper:  trackerScraper,
-		registry: scraperReg,
-		trending: trendingHarvester,
+		cfg:        cfg,
+		cfgPath:    cfgPath,
+		store:      store,
+		crawler:    crawler,
+		torznab:    torznabServer,
+		prowl:      prowlClient,
+		feedGen:    feedGen,
+		ingester:   feedIngester,
+		scraper:    trackerScraper,
+		registry:   scraperReg,
+		trending:   trendingHarvester,
+		downloader: downloadMgr,
 	}
 
 	if crawler != nil {
@@ -216,6 +221,9 @@ func main() {
 	mux.HandleFunc("/api/v1/categories", srv.handleCategories)
 	mux.HandleFunc("/api/v1/sources", srv.handleSources)
 	mux.HandleFunc("/api/v1/config", srv.handleConfig)
+	mux.HandleFunc("/api/v1/clients", srv.handleDownloadClients)
+	mux.HandleFunc("/api/v1/clients/test", srv.handleTestDownloadClient)
+	mux.HandleFunc("/api/v1/client/send", srv.handleSendToClient)
 
 	// Static UI assets: preferentially serve from local disk if web/static exists for instant hot reloading without rebuild
 	var liveFS fs.FS
@@ -460,8 +468,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			ScraperIntervalMin        *int     `json:"scraper_interval_min"`
 			ScraperBatchSize          *int     `json:"scraper_batch_size"`
 			ScraperTrackers           []string `json:"scraper_trackers"`
-			ScraperAutoUpdateTrackers *bool    `json:"scraper_auto_update_trackers"`
-			ScraperTrackersURL        string   `json:"scraper_trackers_url"`
+			ScraperAutoUpdateTrackers *bool                          `json:"scraper_auto_update_trackers"`
+			ScraperTrackersURL        string                         `json:"scraper_trackers_url"`
+			DownloadClients           []config.DownloadClientConfig  `json:"download_clients"`
+			TrendingEnabled           *bool                          `json:"trending_enabled"`
+			TrendingIntervalHours     *int                           `json:"trending_interval_hours"`
+			TrendingMinSeeds          *int                           `json:"trending_min_seeds"`
+			TrendingProviders         map[string]bool                `json:"trending_providers"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -547,6 +560,35 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.ScraperTrackersURL != "" {
 			s.cfg.ScraperTrackersURL = update.ScraperTrackersURL
+		}
+		if update.DownloadClients != nil {
+			s.cfg.DownloadClients = update.DownloadClients
+			if s.downloader != nil {
+				s.downloader.UpdateClients(update.DownloadClients)
+			}
+		}
+
+		if update.TrendingEnabled != nil {
+			s.cfg.TrendingEnabled = *update.TrendingEnabled
+			if s.trending != nil {
+				if *update.TrendingEnabled {
+					s.trending.Start()
+				} else {
+					s.trending.Stop()
+				}
+			}
+		}
+		if update.TrendingIntervalHours != nil && *update.TrendingIntervalHours > 0 {
+			s.cfg.TrendingIntervalHours = *update.TrendingIntervalHours
+		}
+		if update.TrendingMinSeeds != nil && *update.TrendingMinSeeds >= 0 {
+			s.cfg.TrendingMinSeeds = *update.TrendingMinSeeds
+		}
+		if update.TrendingProviders != nil {
+			s.cfg.TrendingProviders = update.TrendingProviders
+		}
+		if s.trending != nil {
+			s.trending.UpdateConfig(s.cfg)
 		}
 
 		if s.crawler != nil {
@@ -1443,3 +1485,175 @@ func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+func (s *Server) handleDownloadClients(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		// Obfuscate client passwords
+		safeClients := make([]config.DownloadClientConfig, len(s.cfg.DownloadClients))
+		for i, c := range s.cfg.DownloadClients {
+			safeClients[i] = c
+			if safeClients[i].Password != "" {
+				safeClients[i].Password = "••••••••"
+			}
+		}
+		_ = json.NewEncoder(w).Encode(safeClients)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var clients []config.DownloadClientConfig
+		if err := json.NewDecoder(r.Body).Decode(&clients); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Preserve masked passwords
+		for i, c := range clients {
+			if isMaskedSecret(c.Password) {
+				for _, old := range s.cfg.DownloadClients {
+					if old.ID == c.ID && old.Password != "" {
+						clients[i].Password = old.Password
+						break
+					}
+				}
+			}
+		}
+
+		s.cfg.DownloadClients = clients
+		if s.downloader != nil {
+			s.downloader.UpdateClients(clients)
+		}
+		_ = config.SaveConfig(s.cfgPath, s.cfg)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "count": len(clients)})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var clientCfg config.DownloadClientConfig
+	if err := json.NewDecoder(r.Body).Decode(&clientCfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Restore password if masked
+	if isMaskedSecret(clientCfg.Password) {
+		for _, old := range s.cfg.DownloadClients {
+			if old.ID == clientCfg.ID {
+				clientCfg.Password = old.Password
+				break
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	err := s.downloader.TestConfig(ctx, clientCfg)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": "Connected successfully to " + clientCfg.Name,
+	})
+}
+
+func (s *Server) handleSendToClient(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ClientID string `json:"client_id"`
+		Hash     string `json:"hash"`
+		Magnet   string `json:"magnet"`
+		Name     string `json:"name"`
+		SavePath string `json:"save_path"`
+		Category string `json:"category"`
+		Paused   bool   `json:"paused"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	req.Hash = strings.TrimSpace(req.Hash)
+	req.Magnet = strings.TrimSpace(req.Magnet)
+
+	if req.Magnet == "" && req.Hash != "" {
+		rec, _ := s.store.GetTorrentByHash(req.Hash)
+		if rec != nil && rec.MagnetURI != "" {
+			req.Magnet = rec.MagnetURI
+			if req.Name == "" {
+				req.Name = rec.Name
+			}
+			if req.Category == "" {
+				req.Category = rec.Category
+			}
+		} else {
+			req.Magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", req.Hash, url.QueryEscape(req.Name))
+		}
+	}
+
+	if req.Magnet == "" {
+		http.Error(w, "missing magnet URI or valid infohash", http.StatusBadRequest)
+		return
+	}
+
+	client, clientCfg, err := s.downloader.GetClient(req.ClientID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	addOpt := downloader.AddOptions{
+		MagnetURI: req.Magnet,
+		Name:      req.Name,
+		SavePath:  req.SavePath,
+		Category:  req.Category,
+		Paused:    req.Paused,
+	}
+
+	if err := client.AddTorrent(ctx, addOpt); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to add torrent to %s: %v", client.Name(), err),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":     true,
+		"client_id":   clientCfg.ID,
+		"client_name": clientCfg.Name,
+		"client_type": clientCfg.Type,
+		"message":     fmt.Sprintf("Torrent sent to %s successfully", client.Name()),
+	})
+}

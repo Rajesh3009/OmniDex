@@ -1747,6 +1747,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
     <td class="col-date" data-label="Added" style="color: var(--text-dim); font-size: 0.8rem;">${formatDate(item.created_time)}</td>
     <td class="col-actions torrent-actions-cell" data-label="Actions" style="text-align: right;">
       <div class="action-btns" style="justify-content: flex-end;">
+        <button class="btn-icon btn-row-send-client" data-index="${index}" data-hash="${escapeHtml(item.info_hash)}" title="Send to BitTorrent Download Client">🚀</button>
         <button class="btn-icon btn-icon-scrape btn-row-scrape" id="scrape-btn-${escapeHtml(item.info_hash)}" data-hash="${escapeHtml(item.info_hash)}" title="Refresh Live Peers via UDP Trackers">🔄</button>
         <a href="${escapeHtml(safeMagnet)}" class="btn-icon btn-icon-magnet" title="Magnet Download">🧲</a>
         <button class="btn-icon btn-icon-delete btn-row-delete" data-hash="${escapeHtml(item.info_hash)}" data-index="${index}" title="Delete from database">🗑️</button>
@@ -1776,6 +1777,13 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   });
   tr.querySelectorAll('.btn-row-fetch-meta').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); triggerResolveMetadata(el.dataset.hash, el); });
+  });
+  tr.querySelectorAll('.btn-row-send-client').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const it = currentTorrents[parseInt(el.dataset.index, 10)];
+      if (it) openQuickSendModal(it);
+    });
   });
   tr.querySelectorAll('.btn-row-scrape').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); triggerScrape(el.dataset.hash, el); });
@@ -1878,6 +1886,11 @@ async function openTorrentDetails(item) {
     const scText = item.last_scraped ? `🔄 Scraped ${formatTimeAgo(item.last_scraped)}` : '🔄 Scrape Swarm';
     scrapedEl.textContent = scText;
     scrapedEl.onclick = () => triggerScrape(item.info_hash, scrapedEl);
+  }
+
+  const btnSendClient = document.getElementById('btn-send-to-client');
+  if (btnSendClient) {
+    btnSendClient.onclick = () => openQuickSendModal(item);
   }
 
   const btnScrapeTorrent = document.getElementById('btn-scrape-torrent');
@@ -2829,3 +2842,139 @@ window.deleteFeed = deleteFeed;
 window.loadFeedsList = loadFeedsList;
 window.deleteTorrentPrompt = deleteTorrentPrompt;
 
+
+// --- Quick Send to Download Client System ---
+
+let availableDownloadClients = [];
+let pendingSendTorrent = null;
+
+async function loadAvailableDownloadClients() {
+  try {
+    const res = await fetch('/api/v1/clients');
+    if (!res.ok) return;
+    const clients = await res.json();
+    availableDownloadClients = (clients || []).filter(c => c.enabled);
+  } catch (err) {
+    console.debug('Error loading download clients:', err);
+  }
+}
+
+function openQuickSendModal(item) {
+  if (!item) return;
+  pendingSendTorrent = item;
+
+  const modal = document.getElementById('modal-quick-send');
+  if (!modal) return;
+
+  document.getElementById('quick-send-title').textContent = item.name;
+  document.getElementById('quick-send-hash').textContent = item.info_hash;
+
+  const clientSelect = document.getElementById('quick-send-client-select');
+  clientSelect.innerHTML = '';
+
+  if (availableDownloadClients.length === 0) {
+    clientSelect.innerHTML = '<option value="">No enabled clients configured (configure in Settings)</option>';
+  } else {
+    availableDownloadClients.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.name} (${c.type.toUpperCase()})${c.is_default ? ' - [DEFAULT]' : ''}`;
+      if (c.is_default) {
+        opt.selected = true;
+      }
+      clientSelect.appendChild(opt);
+    });
+  }
+
+  // Pre-populate category & save path based on chosen client
+  const defaultClient = availableDownloadClients.find(c => c.is_default) || availableDownloadClients[0];
+  const catInput = document.getElementById('quick-send-category');
+  if (catInput) {
+    catInput.value = item.category || (defaultClient ? defaultClient.category : '') || '';
+  }
+
+  const savePathInput = document.getElementById('quick-send-savepath');
+  if (savePathInput) {
+    savePathInput.value = (defaultClient ? defaultClient.save_path : '') || '';
+  }
+
+  const pausedCheck = document.getElementById('quick-send-paused');
+  if (pausedCheck) {
+    pausedCheck.checked = defaultClient ? !defaultClient.auto_start : false;
+  }
+
+  clientSelect.onchange = () => {
+    const chosen = availableDownloadClients.find(c => c.id === clientSelect.value);
+    if (chosen) {
+      if (chosen.category && !catInput.value) catInput.value = chosen.category;
+      if (chosen.save_path) savePathInput.value = chosen.save_path;
+      if (pausedCheck) pausedCheck.checked = !chosen.auto_start;
+    }
+  };
+
+  modal.classList.add('active');
+}
+
+function initQuickSendModal() {
+  const form = document.getElementById('quick-send-form');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!pendingSendTorrent) return;
+
+      const clientSelect = document.getElementById('quick-send-client-select');
+      const clientId = clientSelect ? clientSelect.value : '';
+      if (!clientId) {
+        showToast('Please configure a download client in Settings first', 'warning');
+        return;
+      }
+
+      const category = document.getElementById('quick-send-category')?.value.trim() || '';
+      const savePath = document.getElementById('quick-send-savepath')?.value.trim() || '';
+      const paused = !!document.getElementById('quick-send-paused')?.checked;
+
+      const submitBtn = document.getElementById('btn-submit-quick-send');
+      const origText = submitBtn ? submitBtn.textContent : '';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '🚀 Sending...';
+      }
+
+      try {
+        const payload = {
+          client_id: clientId,
+          hash: pendingSendTorrent.info_hash,
+          magnet: pendingSendTorrent.magnet_uri || '',
+          name: pendingSendTorrent.name,
+          category: category,
+          save_path: savePath,
+          paused: paused
+        };
+
+        const res = await fetch('/api/v1/client/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(data.message || 'Torrent sent to client successfully!', 'success');
+          document.getElementById('modal-quick-send')?.classList.remove('active');
+        } else {
+          showToast('Failed to send: ' + (data.error || 'Server error'), 'error');
+        }
+      } catch (err) {
+        showToast('Send error: ' + err.message, 'error');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = origText;
+        }
+      }
+    });
+  }
+
+  // Load clients on startup
+  loadAvailableDownloadClients();
+}

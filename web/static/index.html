@@ -592,6 +592,7 @@
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;">
+          <button id="btn-send-to-client" class="btn btn-primary" title="Send torrent directly to configured download client" style="display: inline-flex; align-items: center; gap: 6px;">🚀 Send to Client</button>
           <button id="btn-resolve-metadata" class="btn btn-secondary" title="Fetch torrent size, files, and tags via BEP-9 peer exchange" style="display: none;">⚡ Fetch Metadata</button>
           <button id="btn-scrape-torrent" class="btn btn-secondary" title="Query live UDP trackers for fresh seeders & leechers">🔄 Refresh Swarm</button>
           <button id="btn-delete-torrent" class="btn"
@@ -601,6 +602,58 @@
           <a id="detail-magnet-link" href="#" class="btn btn-primary">Open Magnet 🧲</a>
           <button class="btn btn-secondary" data-close="modal-details">Close</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Quick Send to Client Modal -->
+    <div class="modal-overlay" id="modal-quick-send" style="z-index: 10002;">
+      <div class="modal-content" style="max-width: 520px; padding: 24px;">
+        <div class="modal-header" style="margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.4rem;">🚀</span>
+            <h2 style="margin: 0; font-size: 1.15rem; color: #fff;">Send to Download Client</h2>
+          </div>
+          <button class="modal-close" data-close="modal-quick-send">&times;</button>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div id="quick-send-title" style="font-weight: 600; color: #fff; font-size: 0.95rem; margin-bottom: 4px; word-break: break-all;"></div>
+          <div id="quick-send-hash" style="font-family: monospace; font-size: 0.75rem; color: var(--text-dim);"></div>
+        </div>
+
+        <form id="quick-send-form" style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="form-group" style="margin: 0;">
+            <label for="quick-send-client-select">Select Download Client</label>
+            <select id="quick-send-client-select" class="custom-select" style="width: 100%; border: 1px solid var(--border-color); background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 8px 12px;">
+              <!-- Dynamically populated enabled clients -->
+            </select>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label for="quick-send-category">Category</label>
+              <input type="text" id="quick-send-category" class="form-input" placeholder="e.g. Movies, TV">
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label for="quick-send-savepath">Save Path (Optional)</label>
+              <input type="text" id="quick-send-savepath" class="form-input" placeholder="e.g. /downloads">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin: 4px 0 0 0;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); user-select: none;">
+              <input type="checkbox" id="quick-send-paused" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+              <span>Add in Paused state (do not start automatically)</span>
+            </label>
+          </div>
+
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
+            <button type="button" class="btn btn-secondary" data-close="modal-quick-send">Cancel</button>
+            <button type="submit" id="btn-submit-quick-send" class="btn btn-primary" style="padding: 8px 20px;">
+              🚀 Send Torrent
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 

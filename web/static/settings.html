@@ -66,6 +66,11 @@
           <span class="nav-label">Trending Harvester</span>
           <span class="nav-badge" style="color: #fb923c;">Top Seeds</span>
         </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-clients">
+          <span class="nav-icon-box">🚀</span>
+          <span class="nav-label">Download Clients</span>
+          <span class="nav-badge" style="color: #38bdf8;">qBit/Trans/Deluge</span>
+        </button>
         <button type="button" class="settings-nav-item" data-tab="tab-scraper">
           <span class="nav-icon-box">📡</span>
           <span class="nav-label">Tracker Scraper</span>
@@ -386,6 +391,23 @@
               <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px;" id="trending-providers-grid">
                 <!-- Dynamically populated provider checkboxes -->
               </div>
+            </div>
+          </section>
+
+          <!-- TAB: Download Clients (qBittorrent, Transmission, Deluge) -->
+          <section class="settings-section-card" id="tab-clients">
+            <div class="settings-card-header">
+              <div>
+                <h2>🚀 BitTorrent Download Clients</h2>
+                <p>Send torrents directly to your local or remote qBittorrent, Transmission, or Deluge instances.</p>
+              </div>
+              <button type="button" class="btn btn-secondary" id="btn-add-client" style="display: flex; align-items: center; gap: 6px;">
+                <span>+</span> Add Client
+              </button>
+            </div>
+
+            <div id="clients-list-container" style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
+              <!-- Dynamically populated client cards -->
             </div>
           </section>
 
