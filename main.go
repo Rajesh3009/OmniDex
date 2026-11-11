@@ -169,6 +169,7 @@ func main() {
 
 	// Tracker Scraper endpoints
 	mux.HandleFunc("/api/v1/torrent/scrape", srv.handleScrapeTorrent)
+	mux.HandleFunc("/api/v1/torrent/scrape-batch", srv.handleScrapeBatch)
 	mux.HandleFunc("/api/v1/torrent/resolve-metadata", srv.handleResolveMetadata)
 	mux.HandleFunc("/api/v1/scraper/status", srv.handleScraperStatus)
 	mux.HandleFunc("/api/v1/trending/harvest", srv.handleTrendingHarvest)
@@ -661,6 +662,84 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(resMap)
+}
+
+func (s *Server) handleScrapeBatch(w http.ResponseWriter, r *http.Request) {
+	if s.scraper == nil {
+		http.Error(w, "Scraper engine not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Hashes []string `json:"hashes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Hashes) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"count":   0,
+			"results": map[string]any{},
+		})
+		return
+	}
+
+	// Limit to max 70 hashes per batch (fits in single BEP 15 packet)
+	cleanHashes := make([]string, 0, len(req.Hashes))
+	seen := make(map[string]bool)
+	for _, h := range req.Hashes {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if len(h) == 40 && !seen[h] {
+			seen[h] = true
+			cleanHashes = append(cleanHashes, h)
+			if len(cleanHashes) >= 70 {
+				break
+			}
+		}
+	}
+
+	if len(cleanHashes) == 0 {
+		http.Error(w, "no valid 40-character hex infohashes provided", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	results := s.scraper.ScrapeHashes(ctx, cleanHashes)
+
+	resMap := make(map[string]any, len(results))
+	successCount := 0
+	for h, res := range results {
+		resMap[h] = map[string]any{
+			"success":      res.Success,
+			"seeders":      res.Seeders,
+			"leechers":     res.Leechers,
+			"completed":    res.Completed,
+			"last_scraped": res.LastScraped.UTC().Format(time.RFC3339),
+			"error":        res.Error,
+		}
+		if res.Success {
+			successCount++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":       true,
+		"total":         len(cleanHashes),
+		"success_count": successCount,
+		"results":       resMap,
+	})
 }
 
 func (s *Server) handleResolveMetadata(w http.ResponseWriter, r *http.Request) {

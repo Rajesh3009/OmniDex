@@ -285,7 +285,12 @@
           <span class="results-count" id="results-count-text">Showing recent torrents</span>
           <div id="active-filter-badges" class="active-filter-badges"></div>
         </div>
-        <div id="loading-spinner" style="display:none; color: var(--accent-cyan); font-size:0.85rem;">Searching...</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button id="btn-refresh-page-swarm" class="btn btn-secondary btn-sm-action" style="padding: 4px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 5px;" title="Scrape live seeders and leechers via UDP trackers for all visible torrents">
+            <span class="btn-refresh-icon">🔄</span> Refresh Page Swarm
+          </button>
+          <div id="loading-spinner" style="display:none; color: var(--accent-cyan); font-size:0.85rem;">Searching...</div>
+        </div>
       </div>
 
       <div class="torrent-table-wrap">

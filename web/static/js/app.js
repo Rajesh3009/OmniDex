@@ -1560,6 +1560,7 @@ function renderTable(items) {
     items.forEach((item, index) => {
       renderTorrentRow(tbody, item, index, null);
     });
+    scheduleBackgroundSwarmRefresh(items);
     return;
   }
 
@@ -1600,6 +1601,9 @@ function renderTable(items) {
       });
     }
   });
+
+  // Staggered non-blocking background auto-refresh for torrents not scraped within 1 hour
+  scheduleBackgroundSwarmRefresh(items);
 }
 
 function renderTorrentRow(tbody, item, index, groupMeta) {
@@ -2282,6 +2286,161 @@ async function triggerScrape(infoHash, btn) {
     if (button) {
       button.classList.remove('spinning');
     }
+  }
+}
+
+// --- Live Multi-Torrent UDP Batch Scraper & Auto-Refresh ---
+
+let activeSwarmBatchTimer = null;
+let isRefreshingPageSwarm = false;
+
+function applyBatchScrapeResults(resultsMap) {
+  if (!resultsMap) return;
+  for (const [hash, data] of Object.entries(resultsMap)) {
+    if (!data) continue;
+    // Update cached item if present
+    const item = currentTorrents.find(t => t.info_hash.toLowerCase() === hash.toLowerCase());
+    if (item && data.success) {
+      item.seeders = data.seeders;
+      item.leechers = data.leechers;
+      item.last_scraped = data.last_scraped;
+    }
+
+    // Update row in DOM
+    const row = document.querySelector(`tr[data-hash="${hash}"]`);
+    if (row && data.success) {
+      const seedersBadge = row.querySelector('.seeders-badge');
+      if (seedersBadge) {
+        seedersBadge.textContent = `▲ ${data.seeders || 0}`;
+        seedersBadge.title = `${data.seeders || 0} Seeders`;
+        if ((data.seeders || 0) === 0) {
+          seedersBadge.classList.add('zero');
+        } else {
+          seedersBadge.classList.remove('zero');
+        }
+      }
+      const leechersBadge = row.querySelector('.leechers-badge');
+      if (leechersBadge) {
+        leechersBadge.textContent = `▼ ${data.leechers || 0}`;
+        leechersBadge.title = `${data.leechers || 0} Leechers`;
+        if ((data.leechers || 0) === 0) {
+          leechersBadge.classList.add('zero');
+        } else {
+          leechersBadge.classList.remove('zero');
+        }
+      }
+      const healthBadge = row.querySelector('.health-badge');
+      if (healthBadge) {
+        healthBadge.className = 'health-badge ' + getHealthClass(data.seeders);
+        healthBadge.textContent = getHealthLabel(data.seeders);
+      }
+      const scrapeTip = row.querySelector('.scrape-meta-tip');
+      if (scrapeTip) {
+        scrapeTip.textContent = 'Scraped just now';
+      }
+    }
+
+    // Update detail modal if open for this hash
+    const detailHashEl = document.getElementById('detail-hash');
+    if (detailHashEl && detailHashEl.textContent.trim().toLowerCase() === hash.toLowerCase() && data.success) {
+      const sEl = document.getElementById('detail-meta-seeders');
+      if (sEl) sEl.textContent = `▲ ${data.seeders || 0} Seeders`;
+      const lEl = document.getElementById('detail-meta-leechers');
+      if (lEl) lEl.textContent = `▼ ${data.leechers || 0} Leechers`;
+      const scEl = document.getElementById('detail-meta-scraped');
+      if (scEl) scEl.textContent = `🔄 Scraped just now`;
+    }
+  }
+}
+
+async function scrapeBatchHashes(hashes) {
+  if (!hashes || hashes.length === 0) return null;
+  try {
+    const res = await fetch('/api/v1/torrent/scrape-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hashes: hashes })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.success && data.results) {
+      applyBatchScrapeResults(data.results);
+      return data;
+    }
+  } catch (err) {
+    console.debug('Batch scrape error:', err);
+  }
+  return null;
+}
+
+function scheduleBackgroundSwarmRefresh(items) {
+  if (activeSwarmBatchTimer) {
+    clearTimeout(activeSwarmBatchTimer);
+    activeSwarmBatchTimer = null;
+  }
+  if (!items || items.length === 0) return;
+
+  // Stale threshold: 1 hour (3600000 ms)
+  const oneHourAgo = Date.now() - 3600000;
+  const staleHashes = items
+    .filter(it => !it.last_scraped || new Date(it.last_scraped).getTime() < oneHourAgo)
+    .map(it => it.info_hash);
+
+  if (staleHashes.length === 0) return;
+
+  // Staggered batching: 35 hashes per chunk, 3s throttle between chunks
+  const chunkSize = 35;
+  const chunks = [];
+  for (let i = 0; i < staleHashes.length; i += chunkSize) {
+    chunks.push(staleHashes.slice(i, i + chunkSize));
+  }
+
+  // Launch background staggered sequence
+  activeSwarmBatchTimer = setTimeout(async () => {
+    for (let i = 0; i < chunks.length; i++) {
+      await scrapeBatchHashes(chunks[i]);
+      if (i < chunks.length - 1) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+  }, 1000);
+}
+
+async function triggerPageSwarmScrape() {
+  if (isRefreshingPageSwarm) return;
+  const btn = document.getElementById('btn-refresh-page-swarm');
+  const icon = btn ? btn.querySelector('.btn-refresh-icon') : null;
+
+  const hashes = currentTorrents.map(t => t.info_hash).filter(Boolean);
+  if (hashes.length === 0) {
+    showToast('No torrents on page to refresh', 'warning');
+    return;
+  }
+
+  isRefreshingPageSwarm = true;
+  if (btn) btn.disabled = true;
+  if (icon) icon.classList.add('spinning');
+
+  try {
+    const chunkSize = 35;
+    let totalUpdated = 0;
+    for (let i = 0; i < hashes.length; i += chunkSize) {
+      const chunk = hashes.slice(i, i + chunkSize);
+      const res = await scrapeBatchHashes(chunk);
+      if (res && res.success_count) {
+        totalUpdated += res.success_count;
+      }
+      if (i + chunkSize < hashes.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    showToast(`Refreshed page swarm: ${totalUpdated} torrents updated from live trackers`, 'success');
+  } catch (err) {
+    showToast(`Swarm refresh failed: ${err.message}`, 'error');
+  } finally {
+    isRefreshingPageSwarm = false;
+    if (btn) btn.disabled = false;
+    if (icon) icon.classList.remove('spinning');
   }
 }
 
