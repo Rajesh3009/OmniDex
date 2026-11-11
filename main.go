@@ -169,6 +169,7 @@ func main() {
 
 	// Tracker Scraper endpoints
 	mux.HandleFunc("/api/v1/torrent/scrape", srv.handleScrapeTorrent)
+	mux.HandleFunc("/api/v1/torrent/resolve-metadata", srv.handleResolveMetadata)
 	mux.HandleFunc("/api/v1/scraper/status", srv.handleScraperStatus)
 	mux.HandleFunc("/api/v1/trending/harvest", srv.handleTrendingHarvest)
 	mux.HandleFunc("/api/v1/trending/status", srv.handleTrendingStatus)
@@ -660,6 +661,71 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(resMap)
+}
+
+func (s *Server) handleResolveMetadata(w http.ResponseWriter, r *http.Request) {
+	if s.crawler == nil {
+		http.Error(w, "Crawler engine not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
+	}
+	if hash == "" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		var req struct {
+			Hash string `json:"hash"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		hash = strings.TrimSpace(req.Hash)
+	}
+
+	if hash == "" {
+		http.Error(w, "missing hash parameter", http.StatusBadRequest)
+		return
+	}
+
+	var trackers []string
+	rec, _ := s.store.GetTorrentByHash(hash)
+	if rec != nil && rec.MagnetURI != "" {
+		if u, err := url.Parse(rec.MagnetURI); err == nil {
+			trackers = u.Query()["tr"]
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+
+	updatedRec, err := s.crawler.ResolveMetadataNow(ctx, hash, trackers)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		// Enqueue for background resolution so subsequent DHT/tracker events can still resolve it
+		s.crawler.EnqueueMetadataFetch(hash, trackers)
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":   false,
+			"info_hash": hash,
+			"error":     fmt.Sprintf("Metadata resolution timed out (queued in background): %v", err),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":    true,
+		"info_hash":  hash,
+		"name":       updatedRec.Name,
+		"size":       updatedRec.Size,
+		"file_count": updatedRec.FileCount,
+		"files":      updatedRec.FilesJSON,
+		"category":   updatedRec.Category,
+		"resolution": updatedRec.Resolution,
+		"codec":      updatedRec.Codec,
+		"quality":    updatedRec.Quality,
+		"audio":      updatedRec.Audio,
+		"hdr":        updatedRec.HDR,
+		"record":     updatedRec,
+	})
 }
 
 func (s *Server) handleTrendingHarvest(w http.ResponseWriter, r *http.Request) {

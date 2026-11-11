@@ -29,6 +29,18 @@ import (
 	"local-indexer/internal/spamfilter"
 )
 
+// Default public UDP trackers to bootstrap BEP-9 metadata peer exchange
+var DefaultPublicTrackers = [][]string{
+	{"udp://tracker.opentrackr.org:1337/announce"},
+	{"udp://open.demonii.com:1337/announce"},
+	{"udp://open.stealth.si:80/announce"},
+	{"udp://tracker.torrent.eu.org:451/announce"},
+	{"udp://explodie.org:6969/announce"},
+	{"udp://tracker.moeking.me:6969/announce"},
+	{"udp://opentracker.i2p.rocks:6969/announce"},
+	{"udp://tracker.openbittorrent.com:6969/announce"},
+}
+
 type AnnounceJob struct {
 	Hash     metainfo.Hash
 	IP       net.IP
@@ -266,7 +278,8 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 	tcfg.ListenPort = 0 // random available port for TCP peer connections
 	tcfg.NoUpload = true
 	tcfg.DisableUTP = false
-	tcfg.NoDHT = true // We run our own KRPC listener for passive crawling
+	tcfg.DisablePEX = false // Enable BEP 11 Peer Exchange to rapidly discover swarms
+	tcfg.NoDHT = true       // We run our own KRPC listener for passive crawling
 	tcfg.DisableAcceptRateLimiting = true
 	tcfg.EstablishedConnsPerTorrent = cfg.MaxTorrentPeers
 	tcfg.DefaultStorage = disabled.Client{} // Purely memory-based no-op metadata crawler; no disk writes or dummy files
@@ -477,7 +490,7 @@ func (c *Crawler) Start() {
 			return
 		case <-time.After(10 * time.Second):
 		}
-		ticker := time.NewTicker(45 * time.Second)
+		ticker := time.NewTicker(12 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -486,10 +499,10 @@ func (c *Crawler) Start() {
 				return
 			case <-ticker.C:
 				c.flushBandwidth()
-				if c.IsMonthlyLimitExceeded() || len(c.workChan) > 10 {
+				if c.IsMonthlyLimitExceeded() || len(c.workChan) > 50 {
 					continue
 				}
-				zeros, err := c.store.GetZeroSizeTorrents(15)
+				zeros, err := c.store.GetZeroSizeTorrents(30)
 				if err != nil || len(zeros) == 0 {
 					continue
 				}
@@ -619,14 +632,8 @@ func (c *Crawler) ResolveMetadataNow(ctx context.Context, hashHex string, extraT
 	}
 	defer t.Drop()
 
-	trackerList := [][]string{
-		{"udp://tracker.opentrackr.org:1337/announce"},
-		{"udp://open.demonii.com:1337/announce"},
-		{"udp://open.stealth.si:80/announce"},
-		{"udp://tracker.torrent.eu.org:451/announce"},
-		{"udp://explodie.org:6969/announce"},
-		{"udp://tracker.moeking.me:6969/announce"},
-	}
+	trackerList := make([][]string, len(DefaultPublicTrackers))
+	copy(trackerList, DefaultPublicTrackers)
 	for _, tr := range extraTrackers {
 		if tr != "" {
 			trackerList = append(trackerList, []string{tr})
@@ -745,14 +752,8 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	}
 
 	// Add popular high-speed open public trackers to help locate wire peers immediately
-	trackerList := [][]string{
-		{"udp://tracker.opentrackr.org:1337/announce"},
-		{"udp://open.demonii.com:1337/announce"},
-		{"udp://open.stealth.si:80/announce"},
-		{"udp://tracker.torrent.eu.org:451/announce"},
-		{"udp://explodie.org:6969/announce"},
-		{"udp://tracker.moeking.me:6969/announce"},
-	}
+	trackerList := make([][]string, len(DefaultPublicTrackers))
+	copy(trackerList, DefaultPublicTrackers)
 	for _, tr := range job.Trackers {
 		if tr != "" {
 			trackerList = append(trackerList, []string{tr})
@@ -761,9 +762,8 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	t.AddTrackers(trackerList)
 
 	// Wait for metadata (BEP 9 / BEP 10 exchange with wire peers).
-	// Fix #3: 20s timeout instead of 45s. Holding 15 workers × 45s = 675s worth of
-	// open TCP connections saturates OS ports and starves the DHT UDP socket.
-	timeoutCtx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
+	// 12s timeout keeps worker pool agile and prevents socket saturation while PEX runs.
+	timeoutCtx, cancel := context.WithTimeout(c.ctx, 12*time.Second)
 	defer cancel()
 
 	select {

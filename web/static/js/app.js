@@ -1723,7 +1723,7 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
       </div>
     </td>
     <td class="col-category" data-label="Category">${catBadge}</td>
-    <td class="col-size" data-label="Size">${formatBytes(item.size)}</td>
+    <td class="col-size" data-label="Size">${item.size > 0 ? formatBytes(item.size) : `<button class="btn-fetch-meta btn-row-fetch-meta" data-hash="${escapeHtml(item.info_hash)}" title="Fetch metadata via BEP-9 peers">⚡ Fetch Size</button>`}</td>
     <td class="col-files" data-label="Files">
       <button class="btn-files-badge btn-row-files" data-index="${index}" title="View files in this torrent">
         📁 ${item.file_count || 1} ${item.file_count === 1 ? 'file' : 'files'}
@@ -1769,6 +1769,9 @@ function renderTorrentRow(tbody, item, index, groupMeta) {
   });
   tr.querySelectorAll('.btn-group-toggle').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); toggleReleaseGroup(el.dataset.groupId, el); });
+  });
+  tr.querySelectorAll('.btn-row-fetch-meta').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); triggerResolveMetadata(el.dataset.hash, el); });
   });
   tr.querySelectorAll('.btn-row-scrape').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); triggerScrape(el.dataset.hash, el); });
@@ -1827,7 +1830,29 @@ async function openTorrentDetails(item) {
 
   // Metadata Overview Bar
   const sizeEl = document.getElementById('detail-meta-size');
-  if (sizeEl) sizeEl.textContent = `💾 ${formatBytes(item.size)}`;
+  if (sizeEl) {
+    if (item.size > 0) {
+      sizeEl.textContent = `💾 ${formatBytes(item.size)}`;
+      sizeEl.classList.remove('meta-pill-fetch');
+      sizeEl.title = '';
+      sizeEl.onclick = null;
+    } else {
+      sizeEl.textContent = `⚡ 0 B (Fetch)`;
+      sizeEl.classList.add('meta-pill-fetch');
+      sizeEl.title = 'Click to resolve size and files via BEP-9 peers';
+      sizeEl.onclick = () => triggerResolveMetadata(item.info_hash, sizeEl);
+    }
+  }
+
+  const btnResolveMeta = document.getElementById('btn-resolve-metadata');
+  if (btnResolveMeta) {
+    if (item.size <= 0) {
+      btnResolveMeta.style.display = 'inline-block';
+      btnResolveMeta.onclick = () => triggerResolveMetadata(item.info_hash, btnResolveMeta);
+    } else {
+      btnResolveMeta.style.display = 'none';
+    }
+  }
 
   const seedersEl = document.getElementById('detail-meta-seeders');
   if (seedersEl) seedersEl.textContent = `▲ ${item.seeders || 0} Seeders`;
@@ -2077,6 +2102,103 @@ function getHealthLabel(seeders) {
   if (s >= 3) return 'Healthy';
   if (s >= 1) return 'Low';
   return 'Dead';
+}
+
+async function triggerResolveMetadata(infoHash, btn) {
+  if (!infoHash) return;
+  const button = btn || document.querySelector(`button.btn-fetch-meta[data-hash="${infoHash}"]`);
+  const origHtml = button ? button.innerHTML : '';
+  if (button) {
+    button.classList.add('loading');
+    button.innerHTML = '⚡ Resolving...';
+  }
+
+  try {
+    const res = await fetch(`/api/v1/torrent/resolve-metadata?hash=${encodeURIComponent(infoHash)}`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      // Find row in table and update size, files, tags dynamically
+      const row = document.querySelector(`tr[data-hash="${infoHash}"]`);
+      if (row) {
+        const sizeCell = row.querySelector('.col-size');
+        if (sizeCell && data.size > 0) {
+          sizeCell.textContent = formatBytes(data.size);
+        }
+        const fileBtn = row.querySelector('.btn-files-badge');
+        if (fileBtn && data.file_count) {
+          fileBtn.innerHTML = `📁 ${data.file_count} ${data.file_count === 1 ? 'file' : 'files'}`;
+        }
+      }
+
+      // Update currentTorrents cache item if present
+      const item = currentTorrents.find(t => t.info_hash.toLowerCase() === infoHash.toLowerCase());
+      if (item) {
+        item.size = data.size;
+        item.file_count = data.file_count;
+        if (data.files) item.files_json = data.files;
+        if (data.category) item.category = data.category;
+        if (data.resolution) item.resolution = data.resolution;
+        if (data.codec) item.codec = data.codec;
+        if (data.quality) item.quality = data.quality;
+        if (data.audio) item.audio = data.audio;
+        if (data.hdr) item.hdr = data.hdr;
+      }
+
+      // Update detail modal if open for this hash
+      const detailHashEl = document.getElementById('detail-hash');
+      if (detailHashEl && detailHashEl.textContent.trim().toLowerCase() === infoHash.toLowerCase()) {
+        const sEl = document.getElementById('detail-meta-size');
+        if (sEl) {
+          sEl.textContent = `💾 ${formatBytes(data.size)}`;
+          sEl.classList.remove('meta-pill-fetch', 'loading');
+          sEl.title = '';
+          sEl.onclick = null;
+        }
+        const fCountEl = document.getElementById('detail-files-count');
+        if (fCountEl) fCountEl.textContent = data.file_count || 1;
+
+        const btnResolve = document.getElementById('btn-resolve-metadata');
+        if (btnResolve) btnResolve.style.display = 'none';
+
+        if (data.files) {
+          let files = [];
+          try {
+            files = typeof data.files === 'string' ? JSON.parse(data.files) : data.files;
+          } catch(e) {}
+          activeDetailFiles = files;
+          renderDetailFiles(files);
+        }
+
+        // Re-render tags row if tags resolved
+        if (item) {
+          openTorrentDetails(item);
+        }
+      }
+
+      showToast(`Metadata resolved: ${formatBytes(data.size)} (${data.file_count || 1} files)`, 'success');
+    } else {
+      showToast(`Metadata notice: ${data.error || 'Swarm peers did not return info dict yet (queued in background)'}`, 'warning');
+      if (button) {
+        button.innerHTML = '⚡ Queued';
+        setTimeout(() => {
+          if (button && button.innerHTML === '⚡ Queued') {
+            button.innerHTML = origHtml || '⚡ Fetch Size';
+          }
+        }, 5000);
+      }
+    }
+  } catch (err) {
+    showToast(`Metadata resolution request failed: ${err.message}`, 'error');
+    if (button) {
+      button.innerHTML = origHtml || '⚡ Fetch Size';
+    }
+  } finally {
+    if (button) {
+      button.classList.remove('loading');
+    }
+  }
 }
 
 async function triggerScrape(infoHash, btn) {

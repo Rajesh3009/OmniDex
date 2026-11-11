@@ -2493,3 +2493,55 @@ body {
 
 
 
+
+/* Fetch Metadata Badges & Buttons */
+.btn-fetch-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-fetch-meta:hover {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: #f59e0b;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.btn-fetch-meta.loading,
+.meta-pill-fetch.loading {
+  opacity: 0.75;
+  pointer-events: none;
+  animation: pulse-meta 1s infinite alternate;
+}
+
+.meta-pill-fetch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(245, 158, 11, 0.2) !important;
+  border: 1px solid rgba(245, 158, 11, 0.5) !important;
+  color: #fbbf24 !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.meta-pill-fetch:hover {
+  background: rgba(245, 158, 11, 0.35) !important;
+  color: #fff !important;
+}
+
+@keyframes pulse-meta {
+  0% { transform: scale(0.97); opacity: 0.6; }
+  100% { transform: scale(1.02); opacity: 1; }
+}
