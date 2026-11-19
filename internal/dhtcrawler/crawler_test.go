@@ -188,3 +188,30 @@ func TestWorkerExitRaceOnWorkChan(t *testing.T) {
 		t.Fatalf("worker did not exit cleanly when context was canceled")
 	}
 }
+
+func TestSafeDropNil(t *testing.T) {
+	// Should not panic on nil
+	safeDrop(nil)
+}
+
+func TestEnqueueMetadataFetchVisitedDeduplication(t *testing.T) {
+	c := &Crawler{
+		visited:  newBoundedCache(100),
+		inFlight: make(map[string]struct{}),
+		workChan: make(chan AnnounceJob, 10),
+	}
+
+	hashHex := "29ab484ebf826e430f92399a66099fd0187c6855"
+
+	// First enqueue should succeed
+	c.EnqueueMetadataFetch(hashHex, nil)
+	if len(c.workChan) != 1 {
+		t.Fatalf("expected 1 job in workChan, got %d", len(c.workChan))
+	}
+
+	// Immediate second enqueue of the same hash must be dropped by visited/inFlight deduplication
+	c.EnqueueMetadataFetch(hashHex, nil)
+	if len(c.workChan) != 1 {
+		t.Fatalf("expected 1 job in workChan after duplicate enqueue, got %d", len(c.workChan))
+	}
+}

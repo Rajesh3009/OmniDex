@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-11-19
+
+### Fixed
+- **DHT Crawler Torrent Concurrency & Panic Resilience**:
+  - Fixed `panic: already closed` crash caused by concurrent `t.Drop()` calls when duplicate infohashes were resolved in parallel across multiple crawler workers.
+  - Added thread-safe `safeDrop()` utility that catches and recovers from redundant `t.Drop()` invocations.
+  - Implemented thread-safe `inFlight` deduplication in `internal/dhtcrawler` to guarantee the same infohash is never resolved simultaneously by multiple workers.
+  - Added visited cache and in-flight deduplication check to `EnqueueMetadataFetch` to stop runaway re-enqueue loops of zero-size torrents.
+  - Wrapped crawler worker metadata resolution with panic recovery (`safeResolveMetadata`) to protect worker threads and prevent unhandled panics from terminating the process.
+  - Automatically delete unmatched zero-size torrents from SQLite when dropped by the retention filter to avoid infinite retry loops.
+
 ## [1.3.6] - 2026-11-19
 
 ### Added

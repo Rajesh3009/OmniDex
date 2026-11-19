@@ -158,6 +158,9 @@ type Crawler struct {
 
 	filterMu   sync.RWMutex
 	filterFunc func(category, name string) bool
+
+	inFlightMu sync.Mutex
+	inFlight   map[string]struct{}
 }
 
 func (c *Crawler) SetFilterFunc(fn func(category, name string) bool) {
@@ -263,6 +266,7 @@ func NewCrawler(cfg CrawlerConfig, store *db.Store) (*Crawler, error) {
 		lastStatsSample: time.Now(),
 		totalDownloaded: initDownloaded,
 		totalUploaded:   initUploaded,
+		inFlight:        make(map[string]struct{}),
 	}
 
 	if store != nil && cfg.MonthlyDataLimitBytes > 0 {
@@ -596,12 +600,39 @@ func (c *Crawler) enqueueWithTrackers(hash metainfo.Hash, ip net.IP, port int, t
 	}
 }
 
+// safeDrop cleanly drops a torrent instance and safely ignores any already-closed panics.
+func safeDrop(t *torrent.Torrent) {
+	if t == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	t.Drop()
+}
+
 // EnqueueMetadataFetch queues an infohash to resolve its .torrent metadata via BEP 9
 func (c *Crawler) EnqueueMetadataFetch(hashHex string, trackers []string) {
 	if c.IsMonthlyLimitExceeded() {
 		return
 	}
-	hashBytes, err := hex.DecodeString(strings.TrimSpace(hashHex))
+	cleanHex := strings.ToLower(strings.TrimSpace(hashHex))
+	if cleanHex == "" {
+		return
+	}
+
+	if c.visited != nil && c.visited.HasOrAdd(cleanHex) {
+		return
+	}
+
+	c.inFlightMu.Lock()
+	if _, active := c.inFlight[cleanHex]; active {
+		c.inFlightMu.Unlock()
+		return
+	}
+	c.inFlightMu.Unlock()
+
+	hashBytes, err := hex.DecodeString(cleanHex)
 	if err != nil || len(hashBytes) != 20 {
 		return
 	}
@@ -630,7 +661,7 @@ func (c *Crawler) ResolveMetadataNow(ctx context.Context, hashHex string, extraT
 	if t == nil {
 		return nil, fmt.Errorf("failed to add torrent infohash")
 	}
-	defer t.Drop()
+	defer safeDrop(t)
 
 	trackerList := make([][]string, len(DefaultPublicTrackers))
 	copy(trackerList, DefaultPublicTrackers)
@@ -717,9 +748,18 @@ func (c *Crawler) worker(id int) {
 			if c.ctx.Err() != nil {
 				return
 			}
-			c.resolveMetadata(job)
+			c.safeResolveMetadata(job)
 		}
 	}
+}
+
+func (c *Crawler) safeResolveMetadata(job AnnounceJob) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DHT Crawler] Recovered from worker panic: %v", r)
+		}
+	}()
+	c.resolveMetadata(job)
 }
 
 func (c *Crawler) resolveMetadata(job AnnounceJob) {
@@ -728,6 +768,22 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	}
 
 	hashHex := hex.EncodeToString(job.Hash[:])
+
+	// Deduplicate in-flight resolution across concurrent workers
+	c.inFlightMu.Lock()
+	if _, active := c.inFlight[hashHex]; active {
+		c.inFlightMu.Unlock()
+		return
+	}
+	c.inFlight[hashHex] = struct{}{}
+	c.inFlightMu.Unlock()
+
+	defer func() {
+		c.inFlightMu.Lock()
+		delete(c.inFlight, hashHex)
+		c.inFlightMu.Unlock()
+	}()
+
 	atomic.AddInt64(&c.metrics.ActiveResolving, 1)
 	defer atomic.AddInt64(&c.metrics.ActiveResolving, -1)
 
@@ -737,7 +793,7 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 		atomic.AddInt64(&c.metrics.MetadataFailed, 1)
 		return
 	}
-	defer t.Drop()
+	defer safeDrop(t)
 
 	// Proactively connect to the announcing peer who has the torrent
 	if job.Port > 0 && job.IP != nil {
@@ -850,6 +906,9 @@ func (c *Crawler) resolveMetadata(job AnnounceJob) {
 	c.filterMu.RUnlock()
 	if filter != nil && !filter(rec.Category, rec.Name) {
 		log.Printf("[DHT Crawler] Dropping %s (%s): unmatched by retention filter", rec.Name, hashHex)
+		if c.store != nil {
+			_ = c.store.DeleteTorrent(hashHex)
+		}
 		return
 	}
 
