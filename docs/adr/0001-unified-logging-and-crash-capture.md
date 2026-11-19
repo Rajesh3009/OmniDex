@@ -1,0 +1,3 @@
+# Unified Logging Pipeline and Go Runtime Crash Capture
+
+OmniDex requires persistent file logging and reliable crash dump capture without disrupting existing concurrent DHT/scraper workers or leaking API tokens. We decided to route standard library output through a rotating multi-writer and ring buffer, while using Go's `debug.SetCrashOutput` combined with startup crash inspection to write forensic stack traces to timestamped files in the working directory. This captures panics across all goroutines without wrapping every background loop or introducing external C/OS-level supervisor dependencies.

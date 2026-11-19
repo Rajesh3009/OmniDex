@@ -23,5 +23,12 @@
     "oxtorrent": false,
     "audiobookbay": false,
     "sukebei": false
+  },
+  "logging": {
+    "level": "INFO",
+    "file_path": "omnidex.log",
+    "max_size_mb": 10,
+    "max_backups": 3,
+    "log_to_console": true
   }
 }

@@ -23,7 +23,7 @@
           <div style="display: flex; align-items: center; gap: 8px;">
             <h1 class="brand-title">OmniDex</h1>
             <span class="badge badge-dht">Settings</span>
-            <span class="version-tag" style="background: rgba(255, 255, 255, 0.08); padding: 2px 8px; border-radius: 9999px; font-size: 0.72rem; color: var(--text-dim);">v1.3.5</span>
+            <span class="version-tag" style="background: rgba(255, 255, 255, 0.08); padding: 2px 8px; border-radius: 9999px; font-size: 0.72rem; color: var(--text-dim);">v1.3.6</span>
           </div>
           <p class="brand-subtitle">Control Center & Ingestion Configuration</p>
         </div>
@@ -86,6 +86,11 @@
           <span class="nav-label">Memory & Janitor</span>
           <span class="nav-badge">System</span>
         </button>
+        <button type="button" class="settings-nav-item" data-tab="tab-logging">
+          <span class="nav-icon-box">📜</span>
+          <span class="nav-label">Logging & Crash</span>
+          <span class="nav-badge" style="color: #06b6d4;">Diagnostics</span>
+        </button>
 
         <!-- Sidebar Footer Status -->
         <div class="settings-sidebar-footer">
@@ -94,7 +99,7 @@
             <span>OmniDex Engine Active</span>
           </div>
           <div class="sidebar-quick-meta">
-            <span>Version: <strong>v1.3.5</strong></span>
+            <span>Version: <strong>v1.3.6</strong></span>
             <span>Storage: <strong>SQLite WAL</strong></span>
           </div>
         </div>
@@ -556,6 +561,65 @@
               <div class="form-group" style="margin-bottom: 0;">
                 <label for="cfg-auto-prune-days">Prune torrents with 0 seeders older than (days)</label>
                 <input type="number" id="cfg-auto-prune-days" class="form-input" min="1" max="365" value="30">
+              </div>
+            </div>
+          </section>
+
+          <!-- TAB 9: Logging & Crash Diagnostics -->
+          <section class="settings-section-card" id="tab-logging">
+            <div class="settings-card-header">
+              <div>
+                <h2>📜 Logging & Crash Diagnostics</h2>
+                <p>Configure operational logging levels, disk log rotation limits, and crash dump capture.</p>
+              </div>
+              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid #06b6d4;">Diagnostics</span>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-log-level">Log Level</label>
+                <select id="cfg-log-level" class="form-input">
+                  <option value="DEBUG">DEBUG (Verbose internal events & packet traces)</option>
+                  <option value="INFO" selected>INFO (Standard operational activities)</option>
+                  <option value="WARN">WARN (Warnings and degraded operations only)</option>
+                  <option value="ERROR">ERROR (Fatal errors and panics only)</option>
+                </select>
+                <span class="form-hint">Controls event verbosity across disk logs and live stream.</span>
+              </div>
+              <div class="form-group">
+                <label for="cfg-log-file-path">Log File Path</label>
+                <input type="text" id="cfg-log-file-path" class="form-input" placeholder="omnidex.log" />
+                <span class="form-hint">Path to the continuous application log in current directory.</span>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-log-max-size">Max Log Size (MB)</label>
+                <input type="number" id="cfg-log-max-size" class="form-input" min="1" max="500" value="10" />
+                <span class="form-hint">Threshold before rotating the active log to an archive backup.</span>
+              </div>
+              <div class="form-group">
+                <label for="cfg-log-max-backups">Max Archive Backups</label>
+                <input type="number" id="cfg-log-max-backups" class="form-input" min="1" max="20" value="3" />
+                <span class="form-hint">Maximum number of historical log archives retained.</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="cfg-log-to-console" checked />
+                <span>Mirror Log Output to Terminal Console (stdout)</span>
+              </label>
+              <span class="form-hint">Uncheck when running as a headless Windows background service.</span>
+            </div>
+
+            <div style="margin-top: 24px; padding: 16px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--border-color);">
+              <h3 style="margin-top: 0; font-size: 1rem; color: var(--text-color);">Forensic Crash Dump Status</h3>
+              <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px;">Go runtime crash dumps and unhandled goroutine panics are automatically written to <code>crash-YYYYMMDD-HHMMSS.log</code> in the current directory, keeping at most 5 recent crash dumps.</p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <a href="/api/v1/logs/download" class="btn btn-secondary btn-sm" style="text-decoration: none;">⬇️ Download Application Log</a>
+                <a href="/api/v1/logs/crash-download" class="btn btn-secondary btn-sm" style="text-decoration: none;">⚠️ Download Latest Crash Dump</a>
               </div>
             </div>
           </section>

@@ -242,6 +242,15 @@ async function loadConfig() {
     const trendingMinSeeds = document.getElementById('cfg-trending-min-seeds');
     if (trendingMinSeeds) trendingMinSeeds.value = cfg.trending_min_seeds || 5;
 
+    if (cfg.logging) {
+      setVal('cfg-log-level', cfg.logging.level || 'INFO');
+      setVal('cfg-log-file-path', cfg.logging.file_path || 'omnidex.log');
+      setVal('cfg-log-max-size', cfg.logging.max_size_mb || 10);
+      setVal('cfg-log-max-backups', cfg.logging.max_backups || 3);
+      const logConsoleCheck = document.getElementById('cfg-log-to-console');
+      if (logConsoleCheck) logConsoleCheck.checked = cfg.logging.log_to_console !== false;
+    }
+
     renderTrendingProviders(cfg.trending_providers);
     loadTrendingStatus();
 
@@ -297,7 +306,14 @@ async function saveConfig() {
     scraper_trackers: (document.getElementById('cfg-scraper-trackers')?.value || '')
       .split('\n')
       .map(t => t.trim())
-      .filter(t => t.startsWith('udp://'))
+      .filter(t => t.startsWith('udp://')),
+    logging: {
+      level: document.getElementById('cfg-log-level')?.value || 'INFO',
+      file_path: document.getElementById('cfg-log-file-path')?.value?.trim() || 'omnidex.log',
+      max_size_mb: parseInt(document.getElementById('cfg-log-max-size')?.value, 10) || 10,
+      max_backups: parseInt(document.getElementById('cfg-log-max-backups')?.value, 10) || 3,
+      log_to_console: document.getElementById('cfg-log-to-console')?.checked ?? true
+    }
   };
 
   try {

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-11-19
+
+### Added
+- **Unified Rotating Application Logging & Forensic Crash Capture**:
+  - Thread-safe, size-rotating file logger (`omnidex.log`) with automated historical backups (`omnidex.1.log`, `omnidex.2.log`, etc.) in current working directory.
+  - Runtime crash hooking via `runtime/debug.SetCrashOutput` and top-level deferred panic recovery to capture full goroutine stack traces and system diagnostics to `crash-YYYYMMDD-HHMMSS.log`.
+  - Automatic crash log pruning (retains latest 5 crash logs) and startup crash detection surfacing warning banners in console and Web Dashboard.
+  - Automated credential sanitizer to scrub sensitive API keys and tokens from persisted logs and streams.
+  - In-memory 500-entry ring buffer with REST APIs (`/api/v1/logs`, `/api/v1/logs/download`, `/api/v1/logs/crash-download`, `/api/v1/logs/clear`, `/api/v1/logs/level`).
+  - Interactive "Logs" modal in Web UI dashboard with live streaming, level filtering (`ALL`, `DEBUG`, `INFO`, `WARN`, `ERROR`), text search, auto-scroll, and one-click download buttons.
+  - Dedicated "Logging & Crash Diagnostics" configuration section in Settings page with dynamic in-memory level switching.
+
 ## [1.3.5] - 2026-11-17
 
 ### Security & Hardening

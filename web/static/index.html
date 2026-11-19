@@ -22,7 +22,7 @@
         <div class="brand-text">
           <div class="brand-title-wrap">
             <h1>OmniDex</h1>
-            <span class="version-badge" id="app-version-badge">v1.3.5</span>
+            <span class="version-badge" id="app-version-badge">v1.3.6</span>
           </div>
           <span>Hybrid DHT & Torznab Bridge</span>
         </div>
@@ -43,11 +43,32 @@
           title="Clean Dead Torrents">
           🧹 Clean
         </button>
+        <button id="btn-show-logs" class="nav-pill"
+          style="border-color: #06b6d4; color: #cffafe; background: rgba(6, 182, 212, 0.15)"
+          title="View Live Application Logs & Crash History">
+          📜 Logs
+        </button>
         <a href="/settings" id="btn-show-settings" class="nav-pill" style="text-decoration: none;">
           ⚙️ Settings
         </a>
       </div>
     </header>
+
+    <!-- Crash Alert Banner -->
+    <div id="crash-alert-banner" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fecaca; padding: 12px 18px; border-radius: 8px; margin-bottom: 20px; align-items: center; justify-content: space-between;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.4rem;">⚠️</span>
+        <div>
+          <strong>OmniDex detected a previous abnormal crash!</strong>
+          <span style="color: #94a3b8; font-size: 0.85rem; margin-left: 6px;">Forensic dump:</span>
+          <span id="crash-alert-filename" style="font-family: monospace; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem;"></span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <a href="/api/v1/logs/crash-download" class="btn btn-sm" style="background: #ef4444; color: #fff; text-decoration: none; padding: 5px 12px; border-radius: 4px; font-weight: 500;">Download Crash Dump</a>
+        <button id="btn-dismiss-crash-alert" style="background: transparent; border: 1px solid #f87171; color: #fecaca; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Dismiss</button>
+      </div>
+    </div>
 
     <!-- Top Metrics Overview -->
     <section class="stats-grid">
@@ -683,6 +704,56 @@
         <div style="display: flex; gap: 10px; justify-content: center;">
           <button type="button" class="btn btn-secondary" id="btn-cancel-delete-torrent" data-close="modal-confirm-delete-torrent" style="flex: 1;">Cancel</button>
           <button type="button" class="btn btn-primary" id="btn-confirm-delete-torrent" style="flex: 1; background: #ef4444; border-color: #ef4444;">Delete Torrent</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Application Logs Modal -->
+    <div class="modal-overlay" id="modal-logs" style="z-index: 10000;">
+      <div class="modal-content" style="max-width: 950px; width: 92vw; max-height: 88vh; display: flex; flex-direction: column;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h3 style="margin: 0; font-size: 1.2rem;">📜 Application Logs & Diagnostics</h3>
+            <span id="logs-level-badge" style="background: var(--accent-cyan); color: #000; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 12px;">INFO</span>
+          </div>
+          <button class="modal-close" data-close="modal-logs">&times;</button>
+        </div>
+
+        <!-- Toolbar -->
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 0;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <label style="font-size: 0.85rem; color: var(--text-dim);">Level:</label>
+            <select id="log-filter-level" class="input-control" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
+              <option value="ALL">All Levels</option>
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO" selected>INFO</option>
+              <option value="WARN">WARN</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+
+            <input type="text" id="log-search-input" placeholder="Filter log text..." class="input-control" style="width: 180px; padding: 4px 8px; font-size: 0.85rem;" />
+
+            <label style="display: flex; align-items: center; gap: 5px; font-size: 0.85rem; color: var(--text-dim); cursor: pointer;">
+              <input type="checkbox" id="log-autoscroll" checked /> Auto-scroll
+            </label>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <button id="btn-refresh-logs" class="btn btn-sm btn-secondary" title="Refresh logs">🔄 Refresh</button>
+            <button id="btn-clear-logs" class="btn btn-sm btn-secondary" title="Clear in-memory buffer">🧹 Clear</button>
+            <a href="/api/v1/logs/download" class="btn btn-sm" style="background: var(--accent-cyan); color: #000; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-weight: 500;" title="Download full omnidex.log from disk">⬇️ Download Log</a>
+            <a id="btn-download-crash-modal" href="/api/v1/logs/crash-download" class="btn btn-sm" style="display: none; background: #ef4444; color: #fff; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-weight: 500;" title="Download latest crash dump">⚠️ Crash Dump</a>
+          </div>
+        </div>
+
+        <!-- Log Viewer Terminal Window -->
+        <div id="log-terminal" style="background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-family: 'Consolas', 'Fira Code', monospace; font-size: 0.82rem; line-height: 1.5; color: #c9d1d9; overflow-y: auto; flex: 1; min-height: 380px; max-height: 520px; white-space: pre-wrap; word-break: break-all;">
+          <div style="color: #8b949e; text-align: center; padding: 20px;">Loading logs...</div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.8rem; color: var(--text-dim);">
+          <div>Showing <span id="log-count">0</span> entries · File: <code id="log-file-path-display">omnidex.log</code></div>
+          <button class="btn btn-secondary btn-sm" data-close="modal-logs">Close</button>
         </div>
       </div>
     </div>

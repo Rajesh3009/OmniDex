@@ -320,6 +320,20 @@ function initEventListeners() {
     openModal('modal-torznab');
   });
 
+  document.getElementById('btn-show-logs')?.addEventListener('click', () => {
+    openModal('modal-logs');
+    fetchLogs();
+    startLogPolling();
+  });
+
+  document.getElementById('btn-dismiss-crash-alert')?.addEventListener('click', () => {
+    const banner = document.getElementById('crash-alert-banner');
+    if (banner) banner.style.display = 'none';
+  });
+
+  initLogViewer();
+  checkCrashStatus();
+
   const btnSettings = document.getElementById('btn-show-settings');
   if (btnSettings && btnSettings.tagName === 'BUTTON') {
     btnSettings.addEventListener('click', () => {
@@ -2977,4 +2991,129 @@ function initQuickSendModal() {
 
   // Load clients on startup
   loadAvailableDownloadClients();
+}
+
+// ============================================================================
+// Application Logs & Crash Diagnostics Viewer
+// ============================================================================
+
+let allLogEntries = [];
+let logPollTimer = null;
+
+async function checkCrashStatus() {
+  try {
+    const res = await fetch('/api/v1/logs');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.previous_crash_detected) {
+      const banner = document.getElementById('crash-alert-banner');
+      const filenameEl = document.getElementById('crash-alert-filename');
+      const modalCrashBtn = document.getElementById('btn-download-crash-modal');
+      if (filenameEl) filenameEl.textContent = data.latest_crash_file || 'crash-*.log';
+      if (banner) banner.style.display = 'flex';
+      if (modalCrashBtn) modalCrashBtn.style.display = 'inline-block';
+    }
+  } catch (err) {
+    console.debug('Failed to check crash status:', err);
+  }
+}
+
+async function fetchLogs() {
+  try {
+    const res = await fetch('/api/v1/logs');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const badge = document.getElementById('logs-level-badge');
+    if (badge) badge.textContent = data.level || 'INFO';
+
+    const fileEl = document.getElementById('log-file-path-display');
+    if (fileEl) fileEl.textContent = data.log_file_path || 'omnidex.log';
+
+    if (data.previous_crash_detected) {
+      const modalCrashBtn = document.getElementById('btn-download-crash-modal');
+      if (modalCrashBtn) modalCrashBtn.style.display = 'inline-block';
+    }
+
+    allLogEntries = data.entries || [];
+    renderLogs();
+  } catch (err) {
+    console.error('Failed to fetch logs:', err);
+  }
+}
+
+function renderLogs() {
+  const terminal = document.getElementById('log-terminal');
+  const countEl = document.getElementById('log-count');
+  const levelFilter = document.getElementById('log-filter-level')?.value || 'ALL';
+  const query = (document.getElementById('log-search-input')?.value || '').toLowerCase();
+  const autoscroll = document.getElementById('log-autoscroll')?.checked ?? true;
+
+  if (!terminal) return;
+
+  const filtered = allLogEntries.filter(entry => {
+    if (levelFilter !== 'ALL' && entry.level !== levelFilter) return false;
+    if (query && !entry.message.toLowerCase().includes(query)) return false;
+    return true;
+  });
+
+  if (countEl) countEl.textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    terminal.innerHTML = '<div style="color: #8b949e; text-align: center; padding: 20px;">No matching log entries found.</div>';
+    return;
+  }
+
+  const levelColors = {
+    'ERROR': '#f85149',
+    'WARN': '#d29922',
+    'DEBUG': '#a371f7',
+    'INFO': '#58a6ff'
+  };
+
+  const linesHtml = filtered.map(e => {
+    const timeStr = new Date(e.timestamp).toLocaleTimeString();
+    const color = levelColors[e.level] || '#8b949e';
+    const escaped = escapeHtml(e.message);
+    return `<div style="margin-bottom: 2px;"><span style="color: #6e7681;">${timeStr}</span> <span style="color: ${color}; font-weight: 600;">[${e.level}]</span> <span>${escaped}</span></div>`;
+  }).join('');
+
+  terminal.innerHTML = linesHtml;
+
+  if (autoscroll) {
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+}
+
+function startLogPolling() {
+  if (logPollTimer) clearInterval(logPollTimer);
+  logPollTimer = setInterval(() => {
+    const modal = document.getElementById('modal-logs');
+    if (modal && modal.classList.contains('active')) {
+      fetchLogs();
+    } else {
+      clearInterval(logPollTimer);
+      logPollTimer = null;
+    }
+  }, 2500);
+}
+
+function initLogViewer() {
+  document.getElementById('log-filter-level')?.addEventListener('change', () => renderLogs());
+  document.getElementById('log-search-input')?.addEventListener('input', () => renderLogs());
+  document.getElementById('btn-refresh-logs')?.addEventListener('click', () => fetchLogs());
+  document.getElementById('btn-clear-logs')?.addEventListener('click', async () => {
+    try {
+      await fetch('/api/v1/logs/clear', { method: 'POST' });
+      allLogEntries = [];
+      renderLogs();
+      if (typeof showToast === 'function') {
+        showToast('Log buffer cleared', 'success');
+      }
+    } catch (err) {
+      if (typeof showToast === 'function') {
+        showToast('Failed to clear logs: ' + err.message, 'error');
+      }
+    }
+  });
 }

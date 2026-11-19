@@ -50,6 +50,15 @@ type Config struct {
 	TrendingMinSeeds          int                    `json:"trending_min_seeds"`
 	TrendingProviders         map[string]bool        `json:"trending_providers"`
 	DownloadClients           []DownloadClientConfig `json:"download_clients"`
+	Logging                   LoggingConfig          `json:"logging"`
+}
+
+type LoggingConfig struct {
+	Level        string `json:"level"`
+	FilePath     string `json:"file_path"`
+	MaxSizeMB    int    `json:"max_size_mb"`
+	MaxBackups   int    `json:"max_backups"`
+	LogToConsole bool   `json:"log_to_console"`
 }
 
 func generateRandomKey() string {
@@ -143,6 +152,13 @@ func DefaultConfig() Config {
 			"audiobookbay":     false,
 			"sukebei":          false,
 		},
+		Logging: LoggingConfig{
+			Level:        "INFO",
+			FilePath:     "omnidex.log",
+			MaxSizeMB:    10,
+			MaxBackups:   3,
+			LogToConsole: true,
+		},
 	}
 }
 
@@ -183,6 +199,18 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.TrendingProviders == nil {
 		cfg.TrendingProviders = DefaultConfig().TrendingProviders
+	}
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "INFO"
+	}
+	if cfg.Logging.FilePath == "" {
+		cfg.Logging.FilePath = "omnidex.log"
+	}
+	if cfg.Logging.MaxSizeMB <= 0 {
+		cfg.Logging.MaxSizeMB = 10
+	}
+	if cfg.Logging.MaxBackups <= 0 {
+		cfg.Logging.MaxBackups = 3
 	}
 	return cfg, nil
 }

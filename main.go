@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,13 +24,14 @@ import (
 	"local-indexer/internal/dhtcrawler"
 	"local-indexer/internal/feed"
 	"local-indexer/internal/ingester"
+	"local-indexer/internal/logger"
 	"local-indexer/internal/prowlarr"
 	"local-indexer/internal/scraper"
 	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
 )
 
-const Version = "1.3.5"
+const Version = "1.3.6"
 
 //go:embed web/static/*
 var staticFS embed.FS
@@ -47,6 +49,7 @@ type Server struct {
 	registry *scraper.Registry
 	trending *ingester.TrendingHarvester
 	downloader *downloader.Manager
+	appLogger  *logger.Logger
 }
 
 func main() {
@@ -54,6 +57,21 @@ func main() {
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
+	}
+
+	// Initialize unified rotating logger and crash handler
+	appLogger, err := logger.Init(cfg.Logging, Version)
+	if err != nil {
+		log.Printf("[Warning] Failed to initialize logger: %v", err)
+	} else {
+		defer appLogger.RecoverAndDump()
+		defer appLogger.Close(true)
+		appLogger.RegisterSecret(cfg.TorznabAPIKey)
+		appLogger.RegisterSecret(cfg.ProwlarrAPIKey)
+	}
+
+	if appLogger != nil && appLogger.CrashHandler() != nil && appLogger.CrashHandler().PreviousCrashDetected {
+		log.Printf("[Warning] Previous abnormal crash detected! Forensic dump available at: %s", appLogger.CrashHandler().LatestCrashFile)
 	}
 
 	// Initialize SQLite store with WAL mode and FTS5
@@ -125,6 +143,7 @@ func main() {
 		registry:   scraperReg,
 		trending:   trendingHarvester,
 		downloader: downloadMgr,
+		appLogger:  appLogger,
 	}
 
 	if crawler != nil {
@@ -224,6 +243,11 @@ func main() {
 	mux.HandleFunc("/api/v1/clients", srv.handleDownloadClients)
 	mux.HandleFunc("/api/v1/clients/test", srv.handleTestDownloadClient)
 	mux.HandleFunc("/api/v1/client/send", srv.handleSendToClient)
+	mux.HandleFunc("/api/v1/logs", srv.handleGetLogs)
+	mux.HandleFunc("/api/v1/logs/download", srv.handleDownloadLogs)
+	mux.HandleFunc("/api/v1/logs/crash-download", srv.handleDownloadCrash)
+	mux.HandleFunc("/api/v1/logs/clear", srv.handleClearLogs)
+	mux.HandleFunc("/api/v1/logs/level", srv.handleSetLogLevel)
 
 	// Static UI assets: preferentially serve from local disk if web/static exists for instant hot reloading without rebuild
 	var liveFS fs.FS
@@ -475,6 +499,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TrendingIntervalHours     *int                           `json:"trending_interval_hours"`
 			TrendingMinSeeds          *int                           `json:"trending_min_seeds"`
 			TrendingProviders         map[string]bool                `json:"trending_providers"`
+			Logging                   *config.LoggingConfig          `json:"logging"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -600,6 +625,28 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		if s.crawler != nil && (update.MaxDownloadRate != nil || update.MaxUploadRate != nil) {
 			s.crawler.SetRateLimits(s.cfg.MaxDownloadRate, s.cfg.MaxUploadRate)
+		}
+
+		if update.Logging != nil {
+			if update.Logging.Level != "" {
+				s.cfg.Logging.Level = update.Logging.Level
+				if s.appLogger != nil {
+					s.appLogger.SetLevel(update.Logging.Level)
+				}
+			}
+			s.cfg.Logging.LogToConsole = update.Logging.LogToConsole
+			if s.appLogger != nil {
+				s.appLogger.SetConsoleLogging(update.Logging.LogToConsole)
+			}
+			if update.Logging.FilePath != "" {
+				s.cfg.Logging.FilePath = update.Logging.FilePath
+			}
+			if update.Logging.MaxSizeMB > 0 {
+				s.cfg.Logging.MaxSizeMB = update.Logging.MaxSizeMB
+			}
+			if update.Logging.MaxBackups > 0 {
+				s.cfg.Logging.MaxBackups = update.Logging.MaxBackups
+			}
 		}
 
 		_ = config.SaveConfig(s.cfgPath, s.cfg)
@@ -1656,4 +1703,99 @@ func (s *Server) handleSendToClient(w http.ResponseWriter, r *http.Request) {
 		"client_type": clientCfg.Type,
 		"message":     fmt.Sprintf("Torrent sent to %s successfully", client.Name()),
 	})
+}
+
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var entries []logger.LogEntry
+	level := "INFO"
+	logToConsole := true
+	prevCrash := false
+	latestCrash := ""
+
+	if s.appLogger != nil {
+		entries = s.appLogger.RingBuffer().Entries()
+		level = s.appLogger.GetLevel()
+		logToConsole = s.appLogger.GetConsoleLogging()
+		if ch := s.appLogger.CrashHandler(); ch != nil {
+			prevCrash = ch.PreviousCrashDetected
+			latestCrash = ch.LatestCrashFile
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"level":                   level,
+		"log_file_path":           s.cfg.Logging.FilePath,
+		"log_to_console":          logToConsole,
+		"previous_crash_detected": prevCrash,
+		"latest_crash_file":       latestCrash,
+		"entries":                 entries,
+	})
+}
+
+func (s *Server) handleDownloadLogs(w http.ResponseWriter, r *http.Request) {
+	filePath := s.cfg.Logging.FilePath
+	if filePath == "" {
+		filePath = "omnidex.log"
+	}
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "Log file does not exist yet", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(filePath)))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	http.ServeFile(w, r, filePath)
+}
+
+func (s *Server) handleDownloadCrash(w http.ResponseWriter, r *http.Request) {
+	var crashFile string
+	if s.appLogger != nil && s.appLogger.CrashHandler() != nil {
+		crashFile = s.appLogger.CrashHandler().LatestCrashFile
+	}
+	if crashFile == "" {
+		http.Error(w, "No previous crash log found", http.StatusNotFound)
+		return
+	}
+	if _, err := os.Stat(crashFile); os.IsNotExist(err) {
+		http.Error(w, "Crash log file not found on disk", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(crashFile)))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	http.ServeFile(w, r, crashFile)
+}
+
+func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.appLogger != nil {
+		s.appLogger.RingBuffer().Clear()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Level string `json:"level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Level != "" {
+		s.cfg.Logging.Level = req.Level
+		if s.appLogger != nil {
+			s.appLogger.SetLevel(req.Level)
+		}
+		_ = config.SaveConfig(s.cfgPath, s.cfg)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "level": s.cfg.Logging.Level})
 }
