@@ -2,6 +2,12 @@
 
 OmniDex is a local hybrid DHT crawler, torrent metadata indexer, and Torznab bridge.
 
+## Architecture & Core
+
+**Core Engine**:
+The root domain coordinator module (`internal/core.Engine`) that encapsulates all crawler, ingester, scraper, storage, and maintenance subsystems behind a cohesive operations interface.
+_Avoid_: Core service, manager, orchestrator service, backend
+
 ## Logging & Diagnostics
 
 **Application Log**:

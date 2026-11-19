@@ -19,15 +19,11 @@ import (
 	"time"
 
 	"local-indexer/internal/config"
+	"local-indexer/internal/core"
 	"local-indexer/internal/db"
 	"local-indexer/internal/downloader"
-	"local-indexer/internal/dhtcrawler"
 	"local-indexer/internal/feed"
-	"local-indexer/internal/ingester"
 	"local-indexer/internal/logger"
-	"local-indexer/internal/prowlarr"
-	"local-indexer/internal/scraper"
-	"local-indexer/internal/sysinfo"
 	"local-indexer/internal/torznab"
 )
 
@@ -37,19 +33,12 @@ const Version = "1.3.7"
 var staticFS embed.FS
 
 type Server struct {
-	cfg      config.Config
-	cfgPath  string
-	store    *db.Store
-	crawler  *dhtcrawler.Crawler
-	torznab  *torznab.Server
-	prowl    *prowlarr.Client
-	feedGen  *feed.Generator
-	ingester *ingester.Ingester
-	scraper  *scraper.Scraper
-	registry *scraper.Registry
-	trending *ingester.TrendingHarvester
-	downloader *downloader.Manager
-	appLogger  *logger.Logger
+	cfg       config.Config
+	cfgPath   string
+	engine    *core.Engine
+	torznab   *torznab.Server
+	feedGen   *feed.Generator
+	appLogger *logger.Logger
 }
 
 func main() {
@@ -74,29 +63,13 @@ func main() {
 		log.Printf("[Warning] Previous abnormal crash detected! Forensic dump available at: %s", appLogger.CrashHandler().LatestCrashFile)
 	}
 
-	// Initialize SQLite store with WAL mode and FTS5
-	store, err := db.NewStore(cfg.DBPath)
+	// Initialize Deep Core Coordinator Engine
+	engine, err := core.NewEngine(cfg)
 	if err != nil {
-		log.Fatalf("Error opening database store: %v", err)
+		log.Fatalf("Error opening core engine: %v", err)
 	}
-	defer store.Close()
-
-	// Initialize passive DHT crawler
-	crawlerCfg := dhtcrawler.CrawlerConfig{
-		DHTListenAddr:         cfg.DHTListenAddr,
-		MaxTorrentPeers:       cfg.MaxTorrentPeers,
-		Workers:               cfg.DHTWorkers,
-		MaxDownloadRate:       cfg.MaxDownloadRate,
-		MaxUploadRate:         cfg.MaxUploadRate,
-		MonthlyDataLimitBytes: cfg.MonthlyDataLimitBytes,
-	}
-	crawler, err := dhtcrawler.NewCrawler(crawlerCfg, store)
-	if err != nil {
-		log.Printf("[Warning] DHT Crawler failed to start: %v (running in aggregator/torznab mode)", err)
-	} else {
-		crawler.Start()
-		defer crawler.Stop()
-	}
+	defer engine.Close()
+	engine.Start(context.Background())
 
 	// Initialize Torznab inbound server
 	baseURLHost := cfg.WebBindAddr
@@ -104,90 +77,19 @@ func main() {
 		baseURLHost = "localhost"
 	}
 	baseURL := fmt.Sprintf("http://%s:%d", baseURLHost, cfg.WebPort)
-	torznabServer := torznab.NewServer(store, cfg.TorznabAPIKey, baseURL)
-
-	// Initialize Prowlarr client
-	prowlClient := prowlarr.NewClient(cfg.ProwlarrURL, cfg.ProwlarrAPIKey)
+	torznabServer := torznab.NewServer(engine.Store(), cfg.TorznabAPIKey, baseURL)
 
 	// Initialize Dynamic Feed Generator
-	feedGen := feed.NewGenerator(store, baseURL)
-
-	// Initialize External Feed Ingester
-	feedIngester := ingester.NewIngester(store, cfg.ExternalFeeds)
-	feedIngester.Start()
-	defer feedIngester.Stop()
-
-	// Initialize Live UDP Tracker Scraper
-	trackerScraper := scraper.NewScraper(cfg, store)
-	trackerScraper.Start()
-	defer trackerScraper.Stop()
-
-	// Initialize Native Scraper Registry and Trending Harvester
-	scraperReg := scraper.DefaultRegistry()
-	trendingHarvester := ingester.NewTrendingHarvester(cfg, store, scraperReg, trackerScraper)
-	trendingHarvester.Start()
-	defer trendingHarvester.Stop()
-
-	downloadMgr := downloader.NewManager(cfg.DownloadClients)
+	feedGen := feed.NewGenerator(engine.Store(), baseURL)
 
 	srv := &Server{
-		cfg:        cfg,
-		cfgPath:    cfgPath,
-		store:      store,
-		crawler:    crawler,
-		torznab:    torznabServer,
-		prowl:      prowlClient,
-		feedGen:    feedGen,
-		ingester:   feedIngester,
-		scraper:    trackerScraper,
-		registry:   scraperReg,
-		trending:   trendingHarvester,
-		downloader: downloadMgr,
-		appLogger:  appLogger,
+		cfg:       cfg,
+		cfgPath:   cfgPath,
+		engine:    engine,
+		torznab:   torznabServer,
+		feedGen:   feedGen,
+		appLogger: appLogger,
 	}
-
-	if crawler != nil {
-		crawler.SetFilterFunc(srv.cfg.MatchesRetentionFilter)
-	}
-	if feedIngester != nil {
-		feedIngester.SetFilterFunc(srv.cfg.MatchesRetentionFilter)
-		if crawler != nil {
-			feedIngester.SetOnZeroSizeTorrent(func(hash, magnet string) {
-				var trackers []string
-				if magnet != "" {
-					if u, err := url.Parse(magnet); err == nil {
-						trackers = u.Query()["tr"]
-					}
-				}
-				crawler.EnqueueMetadataFetch(hash, trackers)
-			})
-		}
-	}
-
-	// Periodic Memory Janitor (runs every 10 min: checkpoints WAL, shrinks cache, frees OS memory)
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			store.PruneMemory()
-			sysinfo.FreeMemory()
-		}
-	}()
-
-	// Periodic Auto-Pruning Janitor (runs every 6 hours if enabled, with safe 2-fail scrape verification)
-	go func() {
-		ticker := time.NewTicker(6 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			if srv.cfg.AutoPruneDead && srv.cfg.AutoPruneDays > 0 {
-				cutoff := time.Now().AddDate(0, 0, -srv.cfg.AutoPruneDays)
-				n, err := store.PruneTorrents(db.PruneOptions{MaxSeeders: 0, OlderThan: cutoff, MinScrapeFails: 2})
-				if err == nil && n > 0 {
-					log.Printf("[Auto-Prune] Removed %d dead torrents older than %d days (verified dead via scraper)", n, srv.cfg.AutoPruneDays)
-				}
-			}
-		}
-	}()
 
 	mux := http.NewServeMux()
 
@@ -403,7 +305,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Offset:            offset,
 	}
 
-	results, total, err := s.store.SearchWithFilter(filter)
+	results, total, err := s.engine.Search(r.Context(), filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -427,7 +329,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
-	cats, err := s.store.GetCategories()
+	cats, err := s.engine.Categories()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -437,7 +339,7 @@ func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := s.store.GetSources()
+	sources, err := s.engine.Sources()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -447,18 +349,17 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	dbStats, _ := s.store.GetStats()
-	var crawlerMetrics dhtcrawler.Metrics
-	if s.crawler != nil {
-		crawlerMetrics = s.crawler.Metrics()
+	stats, err := s.engine.Stats()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	memStats := sysinfo.GetMemoryStats()
 
 	resp := map[string]any{
 		"version": Version,
-		"db":      dbStats,
-		"dht":     crawlerMetrics,
-		"memory":  memStats,
+		"db":      stats.DB,
+		"dht":     stats.DHT,
+		"memory":  stats.Memory,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -508,15 +409,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		if update.ProwlarrURL != "" {
 			s.cfg.ProwlarrURL = update.ProwlarrURL
-			s.prowl.BaseURL = update.ProwlarrURL
 		}
 		if update.ProwlarrAPIKey != "" {
 			s.cfg.ProwlarrAPIKey = update.ProwlarrAPIKey
-			s.prowl.APIKey = update.ProwlarrAPIKey
 		}
 		if update.TorznabAPIKey != "" {
 			s.cfg.TorznabAPIKey = update.TorznabAPIKey
-			s.torznab = torznab.NewServer(s.store, s.cfg.TorznabAPIKey, fmt.Sprintf("http://localhost:%d", s.cfg.WebPort))
+			if s.appLogger != nil {
+				s.appLogger.RegisterSecret(update.TorznabAPIKey)
+			}
+			s.torznab = torznab.NewServer(s.engine.Store(), s.cfg.TorznabAPIKey, fmt.Sprintf("http://localhost:%d", s.cfg.WebPort))
 		}
 		if update.DHTWorkers > 0 {
 			s.cfg.DHTWorkers = update.DHTWorkers
@@ -541,9 +443,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				ml = 0
 			}
 			s.cfg.MonthlyDataLimitBytes = ml
-			if s.crawler != nil {
-				s.crawler.SetMonthlyLimit(ml)
-			}
 		}
 		if update.AutoPruneDead != nil {
 			s.cfg.AutoPruneDead = *update.AutoPruneDead
@@ -576,9 +475,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.ScraperTrackers != nil {
 			s.cfg.ScraperTrackers = update.ScraperTrackers
-			if s.scraper != nil {
-				s.scraper.SetTrackers(update.ScraperTrackers)
-			}
 		}
 		if update.ScraperAutoUpdateTrackers != nil {
 			s.cfg.ScraperAutoUpdateTrackers = *update.ScraperAutoUpdateTrackers
@@ -588,20 +484,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.DownloadClients != nil {
 			s.cfg.DownloadClients = update.DownloadClients
-			if s.downloader != nil {
-				s.downloader.UpdateClients(update.DownloadClients)
-			}
 		}
 
 		if update.TrendingEnabled != nil {
 			s.cfg.TrendingEnabled = *update.TrendingEnabled
-			if s.trending != nil {
-				if *update.TrendingEnabled {
-					s.trending.Start()
-				} else {
-					s.trending.Stop()
-				}
-			}
 		}
 		if update.TrendingIntervalHours != nil && *update.TrendingIntervalHours > 0 {
 			s.cfg.TrendingIntervalHours = *update.TrendingIntervalHours
@@ -611,20 +497,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if update.TrendingProviders != nil {
 			s.cfg.TrendingProviders = update.TrendingProviders
-		}
-		if s.trending != nil {
-			s.trending.UpdateConfig(s.cfg)
-		}
-
-		if s.crawler != nil {
-			s.crawler.SetFilterFunc(s.cfg.MatchesRetentionFilter)
-		}
-		if s.ingester != nil {
-			s.ingester.SetFilterFunc(s.cfg.MatchesRetentionFilter)
-		}
-
-		if s.crawler != nil && (update.MaxDownloadRate != nil || update.MaxUploadRate != nil) {
-			s.crawler.SetRateLimits(s.cfg.MaxDownloadRate, s.cfg.MaxUploadRate)
 		}
 
 		if update.Logging != nil {
@@ -649,6 +521,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		_ = s.engine.UpdateConfig(s.cfg)
 		_ = config.SaveConfig(s.cfgPath, s.cfg)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -669,7 +542,7 @@ func (s *Server) handleTorrentRoute(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "missing hash parameter", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.DeleteTorrent(hash); err != nil {
+		if err := s.engine.DeleteTorrent(hash); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -681,11 +554,6 @@ func (s *Server) handleTorrentRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
-	if s.scraper == nil {
-		http.Error(w, "Scraper engine not initialized", http.StatusServiceUnavailable)
-		return
-	}
-
 	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
 	if hash == "" {
 		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
@@ -706,7 +574,7 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 
-	res, err := s.scraper.ScrapeSingle(ctx, hash)
+	res, err := s.engine.ScrapeTorrent(ctx, hash)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -727,23 +595,11 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If this torrent has size == 0, attempt metadata resolution with peers
-	rec, _ := s.store.GetTorrentByHash(hash)
+	rec, _ := s.engine.GetTorrent(hash)
 	if rec != nil {
-		if rec.Size <= 0 && s.crawler != nil {
-			var trackers []string
-			if rec.MagnetURI != "" {
-				if u, err := url.Parse(rec.MagnetURI); err == nil {
-					trackers = u.Query()["tr"]
-				}
-			}
-			resolveCtx, resolveCancel := context.WithTimeout(r.Context(), 4*time.Second)
-			updatedRec, rErr := s.crawler.ResolveMetadataNow(resolveCtx, hash, trackers)
-			resolveCancel()
-			if rErr == nil && updatedRec != nil {
+		if rec.Size <= 0 {
+			if updatedRec, _ := s.engine.ResolveMetadata(r.Context(), hash); updatedRec != nil {
 				rec = updatedRec
-			} else {
-				// Continue in background
-				s.crawler.EnqueueMetadataFetch(hash, trackers)
 			}
 		}
 		resMap["size"] = rec.Size
@@ -754,11 +610,6 @@ func (s *Server) handleScrapeTorrent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScrapeBatch(w http.ResponseWriter, r *http.Request) {
-	if s.scraper == nil {
-		http.Error(w, "Scraper engine not initialized", http.StatusServiceUnavailable)
-		return
-	}
-
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -804,7 +655,7 @@ func (s *Server) handleScrapeBatch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	results := s.scraper.ScrapeHashes(ctx, cleanHashes)
+	results := s.engine.ScrapeBatch(ctx, cleanHashes)
 
 	resMap := make(map[string]any, len(results))
 	successCount := 0
@@ -832,11 +683,6 @@ func (s *Server) handleScrapeBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResolveMetadata(w http.ResponseWriter, r *http.Request) {
-	if s.crawler == nil {
-		http.Error(w, "Crawler engine not initialized", http.StatusServiceUnavailable)
-		return
-	}
-
 	hash := strings.TrimSpace(r.URL.Query().Get("hash"))
 	if hash == "" {
 		hash = strings.TrimSpace(r.URL.Query().Get("info_hash"))
@@ -854,22 +700,9 @@ func (s *Server) handleResolveMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var trackers []string
-	rec, _ := s.store.GetTorrentByHash(hash)
-	if rec != nil && rec.MagnetURI != "" {
-		if u, err := url.Parse(rec.MagnetURI); err == nil {
-			trackers = u.Query()["tr"]
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	defer cancel()
-
-	updatedRec, err := s.crawler.ResolveMetadataNow(ctx, hash, trackers)
+	updatedRec, err := s.engine.ResolveMetadata(r.Context(), hash)
 	w.Header().Set("Content-Type", "application/json")
-	if err != nil {
-		// Enqueue for background resolution so subsequent DHT/tracker events can still resolve it
-		s.crawler.EnqueueMetadataFetch(hash, trackers)
+	if err != nil && updatedRec == nil {
 		w.WriteHeader(http.StatusGatewayTimeout)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success":   false,
@@ -904,7 +737,7 @@ func (s *Server) handleTrendingHarvest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	count, err := s.trending.Harvest(ctx)
+	count, err := s.engine.TriggerTrendingHarvest(ctx)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -918,7 +751,7 @@ func (s *Server) handleTrendingHarvest(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("Successfully harvested %d qualified high-seed torrents", count),
 		"count":   count,
-		"stats":   s.trending.Stats(),
+		"stats":   s.engine.TrendingStats(),
 	})
 }
 
@@ -928,34 +761,20 @@ func (s *Server) handleTrendingStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if s.trending == nil {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"running": false,
-		})
-		return
-	}
-	_ = json.NewEncoder(w).Encode(s.trending.Stats())
+	_ = json.NewEncoder(w).Encode(s.engine.TrendingStats())
 }
 
 func (s *Server) handleScraperStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if s.scraper == nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"running": false,
-			"enabled": false,
-		})
-		return
-	}
-
-	stats := s.scraper.Stats()
+	stats := s.engine.ScraperStats()
 	resp := map[string]any{
-		"total_scraped":   stats.TotalScraped,
-		"successful":      stats.Successful,
-		"failed":          stats.Failed,
+		"total_scraped":    stats.TotalScraped,
+		"successful":       stats.Successful,
+		"failed":           stats.Failed,
 		"last_scrape_time": stats.LastScrapeTime,
-		"active_trackers": stats.ActiveTrackers,
-		"running":         stats.Running,
-		"enabled":         s.cfg.ScraperEnabled,
+		"active_trackers":  stats.ActiveTrackers,
+		"running":          stats.Running,
+		"enabled":          s.cfg.ScraperEnabled,
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -985,7 +804,7 @@ func (s *Server) handlePruneTorrents(w http.ResponseWriter, r *http.Request) {
 		PruneSpam:  req.PruneSpam,
 	}
 
-	affected, err := s.store.PruneTorrents(opts)
+	affected, err := s.engine.PruneTorrents(opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1005,7 +824,7 @@ func (s *Server) handleDeadCount(w http.ResponseWriter, r *http.Request) {
 	if days > 0 {
 		cutoff = time.Now().AddDate(0, 0, -days)
 	}
-	count, err := s.store.CountDeadTorrents(maxSeeders, cutoff)
+	count, err := s.engine.CountDeadTorrents(maxSeeders, cutoff)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1035,7 +854,7 @@ func (s *Server) handleFilterPreview(w http.ResponseWriter, r *http.Request) {
 		rules.Keywords = strings.Split(kws, ",")
 	}
 
-	count, err := s.store.CountFilterViolations(rules)
+	count, err := s.engine.CountFilterViolations(rules)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1082,7 +901,7 @@ func (s *Server) handleFilterPurge(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	deleted, err := s.store.PruneFilterViolations(rules)
+	deleted, err := s.engine.PurgeFilterViolations(rules)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1100,9 +919,11 @@ func (s *Server) handleMemoryShrink(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.store.PruneMemory()
-	sysinfo.FreeMemory()
-	mem := sysinfo.GetMemoryStats()
+	mem, err := s.engine.ShrinkMemory()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
@@ -1115,18 +936,11 @@ func (s *Server) deleteFeedByID(id string) bool {
 	if id == "" {
 		return false
 	}
-	found := false
-	var updated []config.FeedConfig
-	for _, f := range s.cfg.ExternalFeeds {
-		if f.ID == id {
-			found = true
-		} else {
-			updated = append(updated, f)
-		}
+	found := s.engine.DeleteFeed(id)
+	if found {
+		s.cfg.ExternalFeeds = s.engine.Feeds()
+		_ = config.SaveConfig(s.cfgPath, s.cfg)
 	}
-	s.cfg.ExternalFeeds = updated
-	_ = config.SaveConfig(s.cfgPath, s.cfg)
-	s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
 	return found
 }
 
@@ -1151,7 +965,7 @@ func (s *Server) handleFeedsDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
-		statuses := s.ingester.GetStatuses()
+		statuses := s.engine.FeedStatuses()
 		_ = json.NewEncoder(w).Encode(statuses)
 		return
 	}
@@ -1183,19 +997,9 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 			f.IntervalMinutes = 30
 		}
 
-		found := false
-		for i, existing := range s.cfg.ExternalFeeds {
-			if existing.ID == f.ID {
-				s.cfg.ExternalFeeds[i] = f
-				found = true
-				break
-			}
-		}
-		if !found {
-			s.cfg.ExternalFeeds = append(s.cfg.ExternalFeeds, f)
-		}
+		s.engine.SaveFeed(f)
+		s.cfg.ExternalFeeds = s.engine.Feeds()
 		_ = config.SaveConfig(s.cfgPath, s.cfg)
-		s.ingester.UpdateFeeds(s.cfg.ExternalFeeds)
 
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "feed": f})
 		return
@@ -1212,7 +1016,7 @@ func (s *Server) handleFeedsSync(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
 	w.Header().Set("Content-Type", "application/json")
 	if id != "" {
-		added, err := s.ingester.SyncFeed(r.Context(), id)
+		added, err := s.engine.SyncFeed(r.Context(), id)
 		if err != nil {
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error(), "added": added})
 			return
@@ -1221,7 +1025,7 @@ func (s *Server) handleFeedsSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	added, errs := s.ingester.SyncAll(r.Context())
+	added, errs := s.engine.SyncAllFeeds(r.Context())
 	var errStrs []string
 	for _, e := range errs {
 		errStrs = append(errStrs, e.Error())
@@ -1256,7 +1060,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		if sourceName == "" {
 			sourceName = "csv-import"
 		}
-		count, err := s.ingester.ImportCSV([]byte(trimmedInput), sourceName)
+		count, err := s.engine.ImportCSV([]byte(trimmedInput), sourceName)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
@@ -1271,7 +1075,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := s.ingester.ImportDirect(req.Input, req.Name)
+	rec, err := s.engine.ImportDirect(req.Input, req.Name)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
@@ -1289,7 +1093,7 @@ func (s *Server) handleGetTorrent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing hash parameter", http.StatusBadRequest)
 		return
 	}
-	rec, err := s.store.GetTorrentByHash(hash)
+	rec, err := s.engine.GetTorrent(hash)
 	if err != nil || rec == nil {
 		http.Error(w, "torrent not found", http.StatusNotFound)
 		return
@@ -1311,7 +1115,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	hash = strings.TrimSuffix(hash, ".torrent")
 
-	rec, err := s.store.GetTorrentByHash(hash)
+	rec, err := s.engine.GetTorrent(hash)
 	if err != nil || rec == nil {
 		http.Error(w, "Torrent not found", http.StatusNotFound)
 		return
@@ -1483,22 +1287,15 @@ func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
 		limit = 30
 	}
 
-	if s.prowl == nil || s.cfg.ProwlarrAPIKey == "" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "unconfigured",
-			"error":  "Prowlarr is not configured",
-			"added":  0,
-			"count":  0,
-		})
-		return
-	}
-
-	prowlResults, err := s.prowl.Search(q, limit)
+	total, added, err := s.engine.SearchAndIndexProwlarr(r.Context(), q, limit)
+	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
+		status := "error"
+		if strings.Contains(err.Error(), "not configured") {
+			status = "unconfigured"
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "error",
+			"status": status,
 			"error":  err.Error(),
 			"added":  0,
 			"count":  0,
@@ -1506,29 +1303,11 @@ func (s *Server) handleProwlarrSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addedCount := 0
-	for _, item := range prowlResults {
-		rec := item.ToRecord()
-		if rec.InfoHash == "" || rec.Name == "" {
-			// Skip truly empty/unusable records (no guid, no download URL, no title)
-			continue
-		}
-		if !s.cfg.MatchesRetentionFilter(rec.Category, rec.Name) {
-			continue
-		}
-		exists, _ := s.store.Exists(rec.InfoHash)
-		if !exists {
-			addedCount++
-		}
-		_ = s.store.UpsertTorrent(&rec)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
 		"query":  q,
-		"count":  len(prowlResults),
-		"added":  addedCount,
+		"count":  total,
+		"added":  added,
 	})
 }
 
@@ -1568,9 +1347,7 @@ func (s *Server) handleDownloadClients(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.cfg.DownloadClients = clients
-		if s.downloader != nil {
-			s.downloader.UpdateClients(clients)
-		}
+		_ = s.engine.UpdateConfig(s.cfg)
 		_ = config.SaveConfig(s.cfgPath, s.cfg)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1606,7 +1383,7 @@ func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	err := s.downloader.TestConfig(ctx, clientCfg)
+	err := s.engine.TestDownloadClient(ctx, clientCfg)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -1643,55 +1420,21 @@ func (s *Server) handleSendToClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Hash = strings.TrimSpace(req.Hash)
-	req.Magnet = strings.TrimSpace(req.Magnet)
-
-	if req.Magnet == "" && req.Hash != "" {
-		rec, _ := s.store.GetTorrentByHash(req.Hash)
-		if rec != nil && rec.MagnetURI != "" {
-			req.Magnet = rec.MagnetURI
-			if req.Name == "" {
-				req.Name = rec.Name
-			}
-			if req.Category == "" {
-				req.Category = rec.Category
-			}
-		} else {
-			req.Magnet = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", req.Hash, url.QueryEscape(req.Name))
-		}
-	}
-
-	if req.Magnet == "" {
-		http.Error(w, "missing magnet URI or valid infohash", http.StatusBadRequest)
-		return
-	}
-
-	client, clientCfg, err := s.downloader.GetClient(req.ClientID)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	addOpt := downloader.AddOptions{
-		MagnetURI: req.Magnet,
-		Name:      req.Name,
-		SavePath:  req.SavePath,
-		Category:  req.Category,
-		Paused:    req.Paused,
+		Name:     req.Name,
+		Category: req.Category,
+		SavePath: req.SavePath,
+		Paused:   req.Paused,
 	}
 
-	if err := client.AddTorrent(ctx, addOpt); err != nil {
+	clientCfg, err := s.engine.SendToClient(ctx, req.ClientID, req.Hash, req.Magnet, addOpt)
+	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"success": false,
-			"error":   fmt.Sprintf("Failed to add torrent to %s: %v", client.Name(), err),
-		})
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
 		return
 	}
 
@@ -1701,7 +1444,7 @@ func (s *Server) handleSendToClient(w http.ResponseWriter, r *http.Request) {
 		"client_id":   clientCfg.ID,
 		"client_name": clientCfg.Name,
 		"client_type": clientCfg.Type,
-		"message":     fmt.Sprintf("Torrent sent to %s successfully", client.Name()),
+		"message":     fmt.Sprintf("Torrent sent to %s successfully", clientCfg.Name),
 	})
 }
 

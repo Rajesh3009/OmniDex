@@ -1,0 +1,3 @@
+# Deep Core Coordinator Engine
+
+OmniDex's entrypoint (`main.go`) previously acted as an 1,800-line God-multiplexer that directly held naked pointers to 11 background subsystems and coordinated peer wire calls, SQL pruning, and background janitors inside HTTP handlers. We decided to encapsulate all crawler, ingester, scraper, storage, and maintenance subsystems behind a deep `internal/core.Engine` coordinator module with a minimal operations interface. This establishes a clean architectural seam separating the business runtime from transport adapters (`main.go` and Web UI handlers), consolidating lifecycle management into `Start`/`Close` and enabling direct unit testing of core workflows without HTTP mocks.
