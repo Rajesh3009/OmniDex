@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-11-20
+
+### Added & Refactored
+- **Deep Core Coordinator Engine (`internal/core.Engine`)**:
+  - Extracted centralized `core.Engine` domain coordinator (ADR-0002) encapsulating crawlers, scrapers, ingesters, harvesters, download clients, and background janitors behind a cohesive operations interface.
+  - Decoupled `main.go` transport entrypoint from internal subsystem lifecycles and background worker concurrency.
+  - Consolidated periodic WAL maintenance compactor and automated dead-torrent pruning janitor into managed engine lifecycles.
+
 ## [1.3.7] - 2026-11-19
 
 ### Fixed
