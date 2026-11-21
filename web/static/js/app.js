@@ -1,6 +1,8 @@
 // OmniDex frontend application
 let currentTorrents = [];
 let lastTotalPages = 1;
+let currentViewMode = localStorage.getItem('view_mode') || 'table';
+let focusedIndex = -1;
 
 const filterState = {
   query: '',
@@ -97,6 +99,10 @@ window.showToast = showToast;
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
   initStatsToggle();
+  initViewModeSwitcher();
+  initKeyboardNavigation();
+  initMobileFilterDrawer();
+  initShortcutsModal();
   loadStats();
   loadConfig();
   loadSources();
@@ -119,8 +125,20 @@ function initEventListeners() {
     performSearch();
   });
 
+  // Debounced live as-you-type search (250ms)
+  let searchDebounceTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      filterState.query = searchInput.value;
+      filterState.page = 1;
+      performSearch();
+    }, 250);
+  });
+
   searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
+      clearTimeout(searchDebounceTimer);
       filterState.query = searchInput.value;
       filterState.page = 1;
       performSearch();
@@ -218,9 +236,19 @@ function initEventListeners() {
   if (checkGrouping) {
     checkGrouping.addEventListener('change', () => {
       filterState.groupByTitle = checkGrouping.checked;
-      renderTable(currentTorrents);
+      renderResults(currentTorrents);
     });
   }
+
+  // Empty State recovery buttons
+  document.getElementById('btn-empty-clear-filters')?.addEventListener('click', () => {
+    resetFilters();
+  });
+  document.getElementById('btn-empty-search-prowlarr')?.addEventListener('click', () => {
+    const checkProwlarr = document.getElementById('check-prowlarr-live');
+    if (checkProwlarr) checkProwlarr.checked = true;
+    performSearch(filterState.query, true);
+  });
 
   // Sort selector
   const sortSelect = document.getElementById('sort-select');
@@ -1063,6 +1091,10 @@ function renderActiveFilterBadges() {
       performSearch();
     });
   }
+
+  if (typeof updateMobileFilterBadge === 'function') {
+    updateMobileFilterBadge();
+  }
 }
 
 function createBadge(container, labelText, onRemove) {
@@ -1193,6 +1225,20 @@ async function loadStats() {
       }
     }
 
+    // Update Collapsed Stats Ticker elements
+    const tickerTorrents = document.getElementById('ticker-torrents');
+    if (tickerTorrents) tickerTorrents.textContent = totalTorrents.toLocaleString();
+    const tickerSize = document.getElementById('ticker-size');
+    if (tickerSize) tickerSize.textContent = formatBytes(data.db ? data.db.total_bytes : 0);
+    const tickerNodes = document.getElementById('ticker-dht-nodes');
+    if (tickerNodes && data.dht) tickerNodes.textContent = (data.dht.good_nodes || 0).toLocaleString();
+    const tickerRam = document.getElementById('ticker-ram');
+    if (tickerRam && data.memory) tickerRam.textContent = `${Math.round(data.memory.rss_bytes / (1024 * 1024))} MB`;
+    const tickerDl = document.getElementById('ticker-dl');
+    if (tickerDl && data.dht) tickerDl.textContent = `${formatBytes(data.dht.download_bytes_rate || 0)}/s`;
+    const tickerUl = document.getElementById('ticker-ul');
+    if (tickerUl && data.dht) tickerUl.textContent = `${formatBytes(data.dht.upload_bytes_rate || 0)}/s`;
+
     // Dynamic list update: If new torrents have been indexed (via DHT or Prowlarr)
     // and user is viewing page 1 with no active modal or editing in progress, refresh page 1 silently!
     if (lastKnownTorrentCount !== null && totalTorrents !== lastKnownTorrentCount) {
@@ -1213,24 +1259,32 @@ async function loadStats() {
 function initStatsToggle() {
   const btnToggle = document.getElementById('btn-toggle-stats');
   const statsGrid = document.querySelector('.stats-grid');
+  const ticker = document.getElementById('stats-ticker');
   const toggleText = document.getElementById('toggle-stats-text');
+  const btnExpandTicker = document.getElementById('btn-expand-ticker');
   if (!btnToggle || !statsGrid) return;
 
+  const updateState = (hidden) => {
+    statsGrid.classList.toggle('stats-hidden', hidden);
+    if (ticker) ticker.style.display = hidden ? 'flex' : 'none';
+    btnToggle.classList.toggle('is-hidden', hidden);
+    if (toggleText) toggleText.textContent = hidden ? 'Show Stats' : 'Hide Stats';
+    localStorage.setItem('hide_stats', hidden ? 'true' : 'false');
+  };
+
   const isHiddenSaved = localStorage.getItem('hide_stats') === 'true';
-  if (isHiddenSaved) {
-    statsGrid.classList.add('stats-hidden');
-    btnToggle.classList.add('is-hidden');
-    if (toggleText) toggleText.textContent = 'Show Stats';
-  }
+  updateState(isHiddenSaved);
 
   btnToggle.addEventListener('click', () => {
-    const isHidden = statsGrid.classList.toggle('stats-hidden');
-    btnToggle.classList.toggle('is-hidden', isHidden);
-    if (toggleText) {
-      toggleText.textContent = isHidden ? 'Show Stats' : 'Hide Stats';
-    }
-    localStorage.setItem('hide_stats', isHidden ? 'true' : 'false');
+    const isHidden = !statsGrid.classList.contains('stats-hidden');
+    updateState(isHidden);
   });
+
+  if (btnExpandTicker) {
+    btnExpandTicker.addEventListener('click', () => {
+      updateState(false);
+    });
+  }
 }
 
 async function loadConfig() {
@@ -1382,8 +1436,10 @@ async function triggerBackgroundProwlarrSearch(query) {
 async function performSearch(overrideQuery, triggerProwlarr = true, silent = false) {
   const loading = document.getElementById('loading-spinner');
   const countText = document.getElementById('results-count-text');
-  const tbody = document.getElementById('torrents-tbody');
   const emptyState = document.getElementById('empty-state');
+  const skeleton = document.getElementById('skeleton-container');
+  const tableWrap = document.getElementById('torrent-table-wrap');
+  const cardsWrap = document.getElementById('torrents-cards');
   const checkProwlarr = document.getElementById('check-prowlarr-live');
   // Default to true when checkbox is absent — always query Prowlarr in the background
   const queryProwlarr = checkProwlarr ? checkProwlarr.checked : true;
@@ -1393,6 +1449,15 @@ async function performSearch(overrideQuery, triggerProwlarr = true, silent = fal
   }
 
   if (loading && !silent) loading.style.display = 'inline-block';
+  if (skeleton && !silent) {
+    if (!skeleton.innerHTML.trim()) {
+      skeleton.innerHTML = Array(6).fill('<div class="skeleton-row"></div>').join('');
+    }
+    skeleton.style.display = 'flex';
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (cardsWrap) cardsWrap.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+  }
   renderActiveFilterBadges();
 
   try {
@@ -1419,7 +1484,17 @@ async function performSearch(overrideQuery, triggerProwlarr = true, silent = fal
     const data = await res.json();
 
     currentTorrents = data.items || [];
-    renderTable(currentTorrents);
+    if (skeleton) skeleton.style.display = 'none';
+
+    if (currentTorrents.length === 0) {
+      if (emptyState) emptyState.style.display = 'block';
+      if (tableWrap) tableWrap.style.display = 'none';
+      if (cardsWrap) cardsWrap.style.display = 'none';
+    } else {
+      if (emptyState) emptyState.style.display = 'none';
+      renderResults(currentTorrents);
+    }
+    focusedIndex = -1;
 
     const total = data.total || 0;
     const limit = filterState.limit;
@@ -1435,10 +1510,6 @@ async function performSearch(overrideQuery, triggerProwlarr = true, silent = fal
       }
     }
 
-    if (emptyState) {
-      emptyState.style.display = currentTorrents.length === 0 ? 'block' : 'none';
-    }
-
     renderPagination(total, page, limit, totalPages);
 
     // After instant local search finishes, if Prowlarr is enabled, query in background
@@ -1448,8 +1519,10 @@ async function performSearch(overrideQuery, triggerProwlarr = true, silent = fal
   } catch (err) {
     console.error('Search error:', err);
     if (countText && !silent) countText.textContent = 'Error fetching search results';
+    if (skeleton) skeleton.style.display = 'none';
   } finally {
     if (loading && !silent) loading.style.display = 'none';
+    if (skeleton) skeleton.style.display = 'none';
   }
 }
 
@@ -1458,9 +1531,9 @@ function goToPage(p) {
   filterState.page = p;
   filterState.offset = (p - 1) * filterState.limit;
   performSearch();
-  const tableWrap = document.querySelector('.torrent-table-wrap');
-  if (tableWrap) {
-    tableWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const target = document.querySelector('.results-header') || document.querySelector('.results-section');
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
@@ -1823,6 +1896,278 @@ function toggleReleaseGroup(groupId, btn) {
   });
 }
 
+function renderResults(items) {
+  const tableWrap = document.getElementById('torrent-table-wrap');
+  const cardsWrap = document.getElementById('torrents-cards');
+  if (currentViewMode === 'cards') {
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (cardsWrap) cardsWrap.style.display = 'grid';
+    renderCards(items);
+  } else {
+    if (tableWrap) tableWrap.style.display = 'block';
+    if (cardsWrap) cardsWrap.style.display = 'none';
+    renderTable(items);
+  }
+}
+
+function renderCards(items) {
+  const container = document.getElementById('torrents-cards');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!filterState.groupByTitle || items.length === 0) {
+    items.forEach((item, index) => {
+      renderTorrentCard(container, item, index, null);
+    });
+    scheduleBackgroundSwarmRefresh(items);
+    return;
+  }
+
+  // Group items by cleaned title key
+  const groups = new Map();
+  items.forEach((item, index) => {
+    const key = cleanTitleKey(item.name);
+    if (!key || key.length < 3) {
+      groups.set(item.info_hash, [{ item, index }]);
+    } else {
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push({ item, index });
+    }
+  });
+
+  let groupCounter = 0;
+  groups.forEach((groupItems) => {
+    groupCounter++;
+    const primary = groupItems[0];
+    const subItems = groupItems.slice(1);
+    const groupId = `card-grp-${groupCounter}`;
+
+    renderTorrentCard(container, primary.item, primary.index, {
+      groupId: groupId,
+      totalReleases: groupItems.length,
+      hasChildren: subItems.length > 0,
+      childItems: subItems
+    });
+  });
+
+  scheduleBackgroundSwarmRefresh(items);
+}
+
+function renderTorrentCard(container, item, index, groupMeta) {
+  const card = document.createElement('div');
+  const cat = item.category || 'Other';
+  let catClass = 'cat-other';
+  if (cat === 'Video') catClass = 'cat-video';
+  else if (cat === 'Audio') catClass = 'cat-audio';
+  else if (cat === 'Software') catClass = 'cat-software';
+  else if (cat === 'Books') catClass = 'cat-books';
+  else if (cat === 'XXX') catClass = 'cat-xxx';
+
+  card.className = `torrent-card ${catClass}`;
+  card.setAttribute('data-index', index);
+  card.setAttribute('data-hash', item.info_hash);
+
+  // Category badge colors
+  let catColor = '#94a3b8';
+  let catBg = 'rgba(148, 163, 184, 0.15)';
+  let catBorder = 'rgba(148, 163, 184, 0.3)';
+  if (cat === 'Video') { catColor = '#c084fc'; catBg = 'rgba(168, 85, 247, 0.15)'; catBorder = 'rgba(168, 85, 247, 0.3)'; }
+  else if (cat === 'Audio') { catColor = '#f472b6'; catBg = 'rgba(236, 72, 153, 0.15)'; catBorder = 'rgba(236, 72, 153, 0.3)'; }
+  else if (cat === 'Software') { catColor = '#facc15'; catBg = 'rgba(234, 179, 8, 0.15)'; catBorder = 'rgba(234, 179, 8, 0.3)'; }
+  else if (cat === 'Books') { catColor = '#34d399'; catBg = 'rgba(16, 185, 129, 0.15)'; catBorder = 'rgba(16, 185, 129, 0.3)'; }
+  else if (cat === 'XXX') { catColor = '#fb7185'; catBg = 'rgba(244, 63, 94, 0.15)'; catBorder = 'rgba(244, 63, 94, 0.35)'; }
+
+  // Source badge
+  let sourceBadge = `<span class="badge badge-dht btn-filter-source" style="cursor: pointer;" data-source="dht" title="Filter by DHT Wire">DHT Wire</span>`;
+  if (item.source === 'prowlarr') {
+    sourceBadge = `<span class="badge badge-prowlarr btn-filter-source" style="cursor: pointer;" data-source="prowlarr" title="Filter by Prowlarr">Prowlarr</span>`;
+  } else if (item.source === 'manual') {
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); cursor: pointer;" data-source="manual" title="Filter by Manual">Manual</span>`;
+  } else if (item.source && item.source.startsWith('trending:')) {
+    const prov = item.source.replace(/^trending:/i, '').toUpperCase();
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #ec4899; background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.3); cursor: pointer;" data-source="${escapeHtml(item.source)}" title="Filter by ${escapeHtml(item.source)}">⚡ ${escapeHtml(prov)}</span>`;
+  } else if (item.source && item.source !== 'dht') {
+    sourceBadge = `<span class="badge btn-filter-source" style="color: #fb923c; background: rgba(251, 146, 60, 0.15); border: 1px solid rgba(251, 146, 60, 0.3); cursor: pointer;" data-source="${escapeHtml(item.source)}" title="Filter by ${escapeHtml(item.source)}">${escapeHtml(item.source)}</span>`;
+  }
+
+  // Tags
+  const tagBadges = [];
+  if (item.resolution) {
+    const safeRes = String(item.resolution);
+    const cls = `tag-res-${escapeHtml(safeRes).toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+    tagBadges.push(`<span class="tag-badge ${cls} btn-filter-tag" data-tag-type="resolution" data-tag-val="${escapeHtml(safeRes)}">${escapeHtml(safeRes)}</span>`);
+  }
+  if (item.codec) {
+    const safeCodec = String(item.codec);
+    tagBadges.push(`<span class="tag-badge tag-codec btn-filter-tag" data-tag-type="codec" data-tag-val="${escapeHtml(safeCodec)}">${escapeHtml(safeCodec)}</span>`);
+  }
+  if (item.quality) {
+    const safeQuality = String(item.quality);
+    tagBadges.push(`<span class="tag-badge tag-quality btn-filter-tag" data-tag-type="quality" data-tag-val="${escapeHtml(safeQuality)}">${escapeHtml(safeQuality)}</span>`);
+  }
+  if (item.hdr) {
+    tagBadges.push(`<span class="tag-badge tag-hdr">${escapeHtml(item.hdr)}</span>`);
+  }
+  if (item.audio) {
+    tagBadges.push(`<span class="tag-badge tag-audio">${escapeHtml(item.audio)}</span>`);
+  }
+  if (item.release_group) {
+    const safeGroup = String(item.release_group);
+    tagBadges.push(`<span class="tag-badge tag-group btn-filter-tag" data-tag-type="releaseGroup" data-tag-val="${escapeHtml(safeGroup)}">${escapeHtml(safeGroup)}</span>`);
+  }
+  if (item.is_suspicious) {
+    tagBadges.push(`<span class="tag-badge tag-spam" title="${escapeHtml(item.spam_reasons || 'Flagged by anti-spam heuristics')}">⚠️ Suspicious</span>`);
+  }
+
+  const seeders = item.seeders || 0;
+  const leechers = item.leechers || 0;
+  const healthClass = getHealthClass(seeders);
+  const healthLabel = getHealthLabel(seeders);
+
+  let safeMagnet = (item.magnet_uri || `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name || '')}`);
+  if (!safeMagnet.startsWith('magnet:?')) {
+    safeMagnet = `magnet:?xt=urn:btih:${encodeURIComponent(item.info_hash)}&dn=${encodeURIComponent(item.name || '')}`;
+  }
+
+  const sizeText = item.size > 0 ? formatBytes(item.size) : `<button class="btn-fetch-meta btn-card-fetch-meta" data-hash="${escapeHtml(item.info_hash)}" title="Fetch metadata via BEP-9 peers">⚡ Fetch Size</button>`;
+
+  let variantsHtml = '';
+  if (groupMeta && groupMeta.hasChildren) {
+    const rows = groupMeta.childItems.map(c => {
+      let childMagnet = (c.item.magnet_uri || `magnet:?xt=urn:btih:${c.item.info_hash}&dn=${encodeURIComponent(c.item.name || '')}`);
+      if (!childMagnet.startsWith('magnet:?')) {
+        childMagnet = `magnet:?xt=urn:btih:${encodeURIComponent(c.item.info_hash)}&dn=${encodeURIComponent(c.item.name || '')}`;
+      }
+      const label = c.item.resolution || c.item.quality || 'Release';
+      return `
+        <div class="card-variant-row">
+          <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;" title="${escapeHtml(c.item.name)}">${escapeHtml(label)} (${formatBytes(c.item.size)})</span>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="color: #10b981; font-size: 0.75rem;">▲ ${c.item.seeders || 0}</span>
+            <a href="${escapeHtml(childMagnet)}" class="btn-icon" title="Magnet" style="padding: 2px 6px; font-size: 0.75rem;">🧲</a>
+            <button class="btn-icon btn-card-sub-send" data-index="${c.index}" title="Send to download client" style="padding: 2px 6px; font-size: 0.75rem;">🚀</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    variantsHtml = `
+      <div style="margin-top: 8px;">
+        <button class="btn btn-ghost btn-xs btn-card-group-toggle" data-target="${groupMeta.groupId}" style="width: 100%; justify-content: center; font-size: 0.75rem; padding: 4px 8px;">
+          📦 +${groupMeta.childItems.length} other ${groupMeta.childItems.length === 1 ? 'quality' : 'qualities'} ▾
+        </button>
+        <div class="card-variants-wrap" id="${groupMeta.groupId}" style="display: none;">
+          ${rows}
+        </div>
+      </div>
+    `;
+  }
+
+  card.innerHTML = `
+    <div>
+      <div class="card-top">
+        <span class="card-category-badge btn-filter-cat" style="color: ${catColor}; background: ${catBg}; border: 1px solid ${catBorder}; cursor: pointer;" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</span>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          ${sourceBadge}
+          <span class="health-badge ${healthClass}" title="Swarm Health: ${healthLabel}">${healthLabel}</span>
+        </div>
+      </div>
+
+      <a href="javascript:void(0)" class="card-title btn-card-details" data-index="${index}" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</a>
+
+      ${tagBadges.length > 0 ? `<div class="card-tags">${tagBadges.join('')}</div>` : ''}
+
+      <div class="card-meta-row">
+        <div>${sizeText}</div>
+        <button class="btn-files-badge btn-card-files" data-index="${index}" title="View files in this torrent">📁 ${item.file_count || 1} files</button>
+        <div class="card-health">
+          <span class="seeds" title="Seeders">▲ ${seeders}</span>
+          <span class="leeches" title="Leechers">▼ ${leechers}</span>
+        </div>
+      </div>
+
+      <div style="font-family: monospace; font-size: 0.7rem; color: var(--text-dim); margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${escapeHtml(item.info_hash)}
+      </div>
+
+      ${variantsHtml}
+    </div>
+
+    <div class="card-actions">
+      <div class="card-actions-left" style="font-size: 0.72rem; color: var(--text-dim);">
+        ${formatDate(item.created_time)}
+      </div>
+      <div class="card-actions-right">
+        <button class="btn-icon btn-card-send" data-index="${index}" title="Send to BitTorrent Download Client">🚀</button>
+        <button class="btn-icon btn-icon-scrape btn-card-scrape" data-hash="${escapeHtml(item.info_hash)}" title="Refresh Live Peers via UDP Trackers">🔄</button>
+        <a href="${escapeHtml(safeMagnet)}" class="btn-icon btn-icon-magnet" title="Magnet Download">🧲</a>
+        <button class="btn-icon btn-icon-delete btn-card-delete" data-hash="${escapeHtml(item.info_hash)}" data-index="${index}" title="Delete from database">🗑️</button>
+      </div>
+    </div>
+  `;
+
+  container.appendChild(card);
+
+  // Attach card event listeners
+  card.querySelector('.btn-card-details')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showDetails(index);
+  });
+  card.querySelector('.btn-card-files')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showFiles(index);
+  });
+  card.querySelectorAll('.btn-filter-cat').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); setCategoryFilter(el.dataset.cat); });
+  });
+  card.querySelectorAll('.btn-filter-source').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); setSourceFilter(el.dataset.source); });
+  });
+  card.querySelectorAll('.btn-filter-tag').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); filterByTag(el.dataset.tagType, el.dataset.tagVal); });
+  });
+  card.querySelector('.btn-card-fetch-meta')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerResolveMetadata(item.info_hash, e.currentTarget);
+  });
+  card.querySelector('.btn-card-send')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openQuickSendModal(item);
+  });
+  card.querySelector('.btn-card-scrape')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerScrape(item.info_hash, e.currentTarget);
+  });
+  card.querySelector('.btn-card-delete')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteTorrentPrompt(item.info_hash, item.name);
+  });
+  card.querySelector('.btn-card-group-toggle')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const targetId = btn.dataset.target;
+    const targetEl = document.getElementById(targetId);
+    if (targetEl) {
+      const isExpanded = targetEl.style.display !== 'none';
+      targetEl.style.display = isExpanded ? 'none' : 'block';
+      btn.textContent = isExpanded
+        ? `📦 +${groupMeta.childItems.length} other ${groupMeta.childItems.length === 1 ? 'quality' : 'qualities'} ▾`
+        : `📦 Hide qualities ▴`;
+    }
+  });
+  card.querySelectorAll('.btn-card-sub-send').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const subIdx = parseInt(el.dataset.index, 10);
+      if (currentTorrents[subIdx]) {
+        openQuickSendModal(currentTorrents[subIdx]);
+      }
+    });
+  });
+}
+
 function getFileIcon(filename) {
   if (!filename) return '📄';
   const ext = filename.split('.').pop().toLowerCase();
@@ -1959,6 +2304,7 @@ async function openTorrentDetails(item) {
 
   activeDetailFiles = normalizeFiles(rawFiles, item.name);
   renderFilesList(activeDetailFiles);
+  updatePrimaryMediaBanner(activeDetailFiles);
 
   const filterInput = document.getElementById('detail-files-filter');
   if (filterInput) {
@@ -2000,6 +2346,7 @@ async function openTorrentDetails(item) {
           const fetchedFiles = typeof fullItem.files_json === 'string' ? JSON.parse(fullItem.files_json) : fullItem.files_json;
           activeDetailFiles = normalizeFiles(fetchedFiles, item.name);
           renderFilesList(activeDetailFiles);
+          updatePrimaryMediaBanner(activeDetailFiles);
         }
       }
     } catch (e) {
@@ -3115,5 +3462,450 @@ function initLogViewer() {
         showToast('Failed to clear logs: ' + err.message, 'error');
       }
     }
+  });
+}
+
+function updatePrimaryMediaBanner(files) {
+  const banner = document.getElementById('primary-media-banner');
+  const iconEl = document.getElementById('primary-media-icon');
+  const nameEl = document.getElementById('primary-media-name');
+  const sizeEl = document.getElementById('primary-media-size');
+  if (!banner) return;
+
+  if (!files || files.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const mediaExts = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'iso', 'mp3', 'flac', 'm4v', 'ts'];
+  let candidate = null;
+  let maxCandidateSize = -1;
+
+  for (const f of files) {
+    if (!f.path) continue;
+    const lower = f.path.toLowerCase();
+    const ext = lower.split('.').pop();
+    if (!mediaExts.includes(ext)) continue;
+    const isSample = /[\/\\_.-](sample|trailer|bonus|preview)[\/\\_.-]/i.test(lower) || /sample\.\w+$/i.test(lower);
+    const size = f.size || 0;
+    if (!candidate || (!isSample && (size > maxCandidateSize || candidate.isSample))) {
+      candidate = { ...f, isSample };
+      maxCandidateSize = size;
+    }
+  }
+
+  if (candidate && maxCandidateSize > 0) {
+    banner.style.display = 'flex';
+    const filename = candidate.path.split(/[/\\]/).pop();
+    if (iconEl) iconEl.textContent = getFileIcon(candidate.path);
+    if (nameEl) {
+      nameEl.textContent = filename;
+      nameEl.title = candidate.path;
+    }
+    if (sizeEl) sizeEl.textContent = formatBytes(candidate.size);
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+function initViewModeSwitcher() {
+  const btnTable = document.getElementById('btn-view-table');
+  const btnCards = document.getElementById('btn-view-cards');
+
+  if (btnTable) {
+    btnTable.addEventListener('click', () => setViewMode('table'));
+  }
+  if (btnCards) {
+    btnCards.addEventListener('click', () => setViewMode('cards'));
+  }
+
+  setViewMode(currentViewMode);
+}
+
+function setViewMode(mode) {
+  currentViewMode = mode;
+  localStorage.setItem('view_mode', mode);
+
+  const btnTable = document.getElementById('btn-view-table');
+  const btnCards = document.getElementById('btn-view-cards');
+  if (btnTable) btnTable.classList.toggle('active', mode === 'table');
+  if (btnCards) btnCards.classList.toggle('active', mode === 'cards');
+
+  const tableWrap = document.getElementById('torrent-table-wrap');
+  const cardsWrap = document.getElementById('torrents-cards');
+  const emptyState = document.getElementById('empty-state');
+
+  if (emptyState && emptyState.style.display !== 'none') {
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (cardsWrap) cardsWrap.style.display = 'none';
+    return;
+  }
+
+  if (mode === 'cards') {
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (cardsWrap) {
+      cardsWrap.style.display = 'grid';
+      if (cardsWrap.children.length === 0 && currentTorrents.length > 0) {
+        renderCards(currentTorrents);
+      }
+    }
+  } else {
+    if (cardsWrap) cardsWrap.style.display = 'none';
+    if (tableWrap) {
+      tableWrap.style.display = 'block';
+      if (currentTorrents.length > 0 && document.getElementById('torrents-tbody')?.children.length === 0) {
+        renderTable(currentTorrents);
+      }
+    }
+  }
+  updateFocusRing();
+}
+
+function initKeyboardNavigation() {
+  window.addEventListener('keydown', (e) => {
+    const tag = (document.activeElement?.tagName || '').toLowerCase();
+    const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+    const activeModal = document.querySelector('.modal-overlay.active');
+    const drawerOpen = document.getElementById('filter-drawer-overlay')?.classList.contains('active');
+
+    if (e.key === 'Escape') {
+      if (activeModal) {
+        e.preventDefault();
+        activeModal.classList.remove('active');
+        return;
+      }
+      if (drawerOpen) {
+        e.preventDefault();
+        document.getElementById('filter-drawer-overlay')?.classList.remove('active');
+        return;
+      }
+      if (isInput) {
+        e.preventDefault();
+        document.activeElement.blur();
+        return;
+      }
+      if (focusedIndex >= 0) {
+        focusedIndex = -1;
+        updateFocusRing();
+        return;
+      }
+      return;
+    }
+
+    if (isInput || activeModal || drawerOpen) {
+      return;
+    }
+
+    if (e.key === '/') {
+      e.preventDefault();
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+      return;
+    }
+
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (currentTorrents.length === 0) return;
+      focusedIndex = Math.min(focusedIndex + 1, currentTorrents.length - 1);
+      updateFocusRing();
+      return;
+    }
+
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (currentTorrents.length === 0) return;
+      focusedIndex = Math.max(focusedIndex - 1, 0);
+      updateFocusRing();
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      if (focusedIndex >= 0 && focusedIndex < currentTorrents.length) {
+        e.preventDefault();
+        showDetails(focusedIndex);
+      }
+      return;
+    }
+
+    if (e.key === 'm') {
+      if (focusedIndex >= 0 && focusedIndex < currentTorrents.length) {
+        e.preventDefault();
+        const it = currentTorrents[focusedIndex];
+        const magnet = it.magnet_uri || `magnet:?xt=urn:btih:${it.info_hash}&dn=${encodeURIComponent(it.name)}`;
+        navigator.clipboard.writeText(magnet).then(() => {
+          showToast(`Magnet copied for "${it.name.slice(0, 30)}..."`, 'success');
+        });
+      }
+      return;
+    }
+
+    if (e.key === 'q') {
+      if (focusedIndex >= 0 && focusedIndex < currentTorrents.length) {
+        e.preventDefault();
+        openQuickSendModal(currentTorrents[focusedIndex]);
+      }
+      return;
+    }
+
+    if (e.key === 'r') {
+      if (focusedIndex >= 0 && focusedIndex < currentTorrents.length) {
+        e.preventDefault();
+        const it = currentTorrents[focusedIndex];
+        triggerScrape(it.info_hash);
+      }
+      return;
+    }
+
+    if (e.key === 'v') {
+      e.preventDefault();
+      setViewMode(currentViewMode === 'table' ? 'cards' : 'table');
+      return;
+    }
+
+    if (e.key === 's') {
+      e.preventDefault();
+      const btnToggle = document.getElementById('btn-toggle-stats');
+      if (btnToggle) btnToggle.click();
+      return;
+    }
+
+    if (e.key === '?') {
+      e.preventDefault();
+      openModal('modal-shortcuts');
+      return;
+    }
+  });
+}
+
+function updateFocusRing() {
+  document.querySelectorAll('.focused-item').forEach(el => el.classList.remove('focused-item'));
+  if (focusedIndex < 0 || focusedIndex >= currentTorrents.length) return;
+
+  const item = currentTorrents[focusedIndex];
+  if (!item) return;
+
+  let target = null;
+  if (currentViewMode === 'cards') {
+    target = document.querySelector(`.torrent-card[data-index="${focusedIndex}"]`);
+  } else {
+    target = document.querySelector(`.torrent-row[data-hash="${item.info_hash}"]`);
+  }
+
+  if (target) {
+    target.classList.add('focused-item');
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function initMobileFilterDrawer() {
+  const overlay = document.getElementById('filter-drawer-overlay');
+  const btnOpen = document.getElementById('btn-open-filter-drawer');
+  const btnClose = document.getElementById('btn-close-filter-drawer');
+  const btnApply = document.getElementById('btn-drawer-apply');
+  const btnReset = document.getElementById('btn-drawer-reset');
+
+  if (!overlay) return;
+
+  const closeDrawer = () => overlay.classList.remove('active');
+  const openDrawer = () => {
+    populateFilterDrawer();
+    overlay.classList.add('active');
+  };
+
+  if (btnOpen) btnOpen.addEventListener('click', openDrawer);
+  if (btnClose) btnClose.addEventListener('click', closeDrawer);
+  if (btnApply) btnApply.addEventListener('click', closeDrawer);
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      resetFilters();
+      populateFilterDrawer();
+    });
+  }
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeDrawer();
+  });
+
+  updateMobileFilterBadge();
+}
+
+function updateMobileFilterBadge() {
+  const badge = document.getElementById('mobile-filter-badge');
+  if (!badge) return;
+  let count = 0;
+  if (filterState.category !== 'all') count++;
+  if (filterState.source !== 'all') count++;
+  if (filterState.sizePreset !== 'all') count++;
+  if (filterState.resolution !== 'all') count++;
+  if (filterState.codec !== 'all') count++;
+  if (filterState.quality !== 'all') count++;
+  if (filterState.includeSuspicious) count++;
+  if (filterState.releaseGroup) count++;
+
+  badge.textContent = count;
+  badge.style.display = count > 0 ? 'inline-block' : 'none';
+}
+
+function populateFilterDrawer() {
+  const drawerBody = document.getElementById('filter-drawer-body');
+  if (!drawerBody) return;
+
+  drawerBody.innerHTML = `
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Category</label>
+      <select id="drawer-filter-category" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.category === 'all' ? 'selected' : ''}>All Categories</option>
+        <option value="Video" ${filterState.category === 'Video' ? 'selected' : ''}>🎬 Video</option>
+        <option value="Audio" ${filterState.category === 'Audio' ? 'selected' : ''}>🎵 Audio</option>
+        <option value="Software" ${filterState.category === 'Software' ? 'selected' : ''}>💻 Software</option>
+        <option value="Books" ${filterState.category === 'Books' ? 'selected' : ''}>📚 Books</option>
+        <option value="XXX" ${filterState.category === 'XXX' ? 'selected' : ''}>🔞 XXX</option>
+        <option value="Other" ${filterState.category === 'Other' ? 'selected' : ''}>📁 Other</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Source</label>
+      <select id="drawer-filter-source" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.source === 'all' ? 'selected' : ''}>All Sources</option>
+        <option value="dht" ${filterState.source === 'dht' ? 'selected' : ''}>DHT Wire</option>
+        <option value="prowlarr" ${filterState.source === 'prowlarr' ? 'selected' : ''}>Prowlarr</option>
+        <option value="manual" ${filterState.source === 'manual' ? 'selected' : ''}>Manual</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Size</label>
+      <select id="drawer-filter-size" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.sizePreset === 'all' ? 'selected' : ''}>Any Size</option>
+        <option value="tiny" ${filterState.sizePreset === 'tiny' ? 'selected' : ''}>&lt; 500 MB</option>
+        <option value="small" ${filterState.sizePreset === 'small' ? 'selected' : ''}>500 MB – 2 GB</option>
+        <option value="medium" ${filterState.sizePreset === 'medium' ? 'selected' : ''}>2 GB – 10 GB</option>
+        <option value="large" ${filterState.sizePreset === 'large' ? 'selected' : ''}>&gt; 10 GB</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Resolution</label>
+      <select id="drawer-filter-res" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.resolution === 'all' ? 'selected' : ''}>All Resolutions</option>
+        <option value="2160p" ${filterState.resolution === '2160p' ? 'selected' : ''}>4K / 2160p</option>
+        <option value="1080p" ${filterState.resolution === '1080p' ? 'selected' : ''}>1080p</option>
+        <option value="720p" ${filterState.resolution === '720p' ? 'selected' : ''}>720p</option>
+        <option value="480p" ${filterState.resolution === '480p' ? 'selected' : ''}>480p / SD</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Codec</label>
+      <select id="drawer-filter-codec" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.codec === 'all' ? 'selected' : ''}>All Codecs</option>
+        <option value="x265" ${filterState.codec === 'x265' ? 'selected' : ''}>HEVC / x265</option>
+        <option value="x264" ${filterState.codec === 'x264' ? 'selected' : ''}>AVC / x264</option>
+        <option value="av1" ${filterState.codec === 'av1' ? 'selected' : ''}>AV1</option>
+        <option value="xvid" ${filterState.codec === 'xvid' ? 'selected' : ''}>XviD</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Quality</label>
+      <select id="drawer-filter-quality" class="custom-select" style="width: 100%;">
+        <option value="all" ${filterState.quality === 'all' ? 'selected' : ''}>All Qualities</option>
+        <option value="BluRay" ${filterState.quality === 'BluRay' ? 'selected' : ''}>BluRay / Remux</option>
+        <option value="WEB-DL" ${filterState.quality === 'WEB-DL' ? 'selected' : ''}>WEB-DL / WEBRip</option>
+        <option value="HDTV" ${filterState.quality === 'HDTV' ? 'selected' : ''}>HDTV</option>
+        <option value="CAM" ${filterState.quality === 'CAM' ? 'selected' : ''}>CAM / Telesync</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">Sort By</label>
+      <select id="drawer-sort-select" class="custom-select" style="width: 100%;">
+        <option value="created_desc" ${filterState.sort === 'created_desc' ? 'selected' : ''}>Newest First</option>
+        <option value="created_asc" ${filterState.sort === 'created_asc' ? 'selected' : ''}>Oldest First</option>
+        <option value="seeders_desc" ${filterState.sort === 'seeders_desc' ? 'selected' : ''}>Most Seeders</option>
+        <option value="size_desc" ${filterState.sort === 'size_desc' ? 'selected' : ''}>Largest Size</option>
+        <option value="size_asc" ${filterState.sort === 'size_asc' ? 'selected' : ''}>Smallest Size</option>
+        <option value="name_asc" ${filterState.sort === 'name_asc' ? 'selected' : ''}>Title (A–Z)</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-top: 8px;">
+      <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted);">
+        <input type="checkbox" id="drawer-check-suspicious" ${filterState.includeSuspicious ? 'checked' : ''} style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+        <span>Include Suspicious Torrents</span>
+      </label>
+    </div>
+  `;
+
+  // Bind change listeners in drawer
+  document.getElementById('drawer-filter-category')?.addEventListener('change', (e) => {
+    setCategoryFilter(e.target.value);
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-filter-source')?.addEventListener('change', (e) => {
+    filterState.source = e.target.value;
+    const fs = document.getElementById('filter-source');
+    if (fs) fs.value = e.target.value;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-filter-size')?.addEventListener('change', (e) => {
+    setSizePreset(e.target.value);
+    const fs = document.getElementById('filter-size');
+    if (fs) fs.value = e.target.value;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-filter-res')?.addEventListener('change', (e) => {
+    filterState.resolution = e.target.value;
+    const fr = document.getElementById('filter-res');
+    if (fr) fr.value = e.target.value;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-filter-codec')?.addEventListener('change', (e) => {
+    filterState.codec = e.target.value;
+    const fc = document.getElementById('filter-codec');
+    if (fc) fc.value = e.target.value;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-filter-quality')?.addEventListener('change', (e) => {
+    filterState.quality = e.target.value;
+    const fq = document.getElementById('filter-quality');
+    if (fq) fq.value = e.target.value;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+  document.getElementById('drawer-sort-select')?.addEventListener('change', (e) => {
+    filterState.sort = e.target.value;
+    const ss = document.getElementById('sort-select');
+    if (ss) ss.value = e.target.value;
+    filterState.page = 1;
+    updateSortIndicators();
+    performSearch();
+  });
+  document.getElementById('drawer-check-suspicious')?.addEventListener('change', (e) => {
+    filterState.includeSuspicious = e.target.checked;
+    const cs = document.getElementById('check-include-suspicious');
+    if (cs) cs.checked = e.target.checked;
+    filterState.page = 1;
+    performSearch();
+    updateMobileFilterBadge();
+  });
+}
+
+function initShortcutsModal() {
+  document.getElementById('btn-show-shortcuts')?.addEventListener('click', () => {
+    openModal('modal-shortcuts');
   });
 }

@@ -43,3 +43,41 @@ _Avoid_: Auto-updater, binary puller, release downloader
 **Directory Migrator**:
 The data relocation module (`internal/cli.Migrator`) that safely stops active services, coordinates SQLite WAL checkpoints, moves database and configuration files, and updates systemd unit paths.
 _Avoid_: File mover, folder copier, path updater
+
+## User Interface & Presentation
+
+**Search & Discovery Dashboard**:
+The primary catalog interface for querying, filtering, and inspecting indexed torrent releases.
+_Avoid_: Home screen, torrent search engine, web GUI
+
+**Dense Table View**:
+A high-information tabular results layout optimized for desktop displays, seeder comparisons, and compact data inspection.
+_Avoid_: Spreadsheet view, grid list
+
+**Visual Card View**:
+A rich, media-focused results grid featuring prominent resolution, codec, audio badges, and release tags.
+_Avoid_: Poster view, thumbnail grid
+
+**Release Group**:
+An expandable UI container that aggregates multiple releases or quality encodes of the same media title into a single master entry.
+_Avoid_: Duplicate cluster, release bundle, torrent folder
+
+**Stats Ticker**:
+A minimized single-line operational summary bar displayed when the full top metrics grid is collapsed to maximize vertical catalog space.
+_Avoid_: Mini stats, status bar, compact header
+
+**Focus Ring**:
+A high-contrast visual highlight indicating the actively selected torrent card or row during keyboard-driven catalog navigation.
+_Avoid_: Selection box, cursor indicator, active highlight
+
+**Shortcut Modal**:
+An interactive in-app cheat sheet overlay displaying all keyboard navigation bindings and hotkey triggers.
+_Avoid_: Help popup, hotkey menu, keybind dialog
+
+**Filter Drawer**:
+A responsive slide-over panel that consolidates secondary filter controls on mobile viewports to preserve vertical catalog space.
+_Avoid_: Filter popup, mobile menu, bottom sheet
+
+**File Inspector**:
+An enriched file-tree component inside the Torrent Details modal featuring extension-aware icons, in-modal file search, and primary media file identification.
+_Avoid_: File list, contents viewer, torrent file browser

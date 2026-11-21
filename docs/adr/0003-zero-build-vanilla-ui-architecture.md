@@ -1,0 +1,3 @@
+# Zero-Build Vanilla Web UI Architecture
+
+OmniDex requires a fast, responsive, and visually modern search dashboard while preserving single-binary Go cross-compilation without Node.js or npm toolchain dependencies. We decided to retain and modernize a zero-build vanilla CSS and JavaScript architecture utilizing CSS custom properties, responsive grid/flexbox layouts, and native DOM event listeners embedded directly into the binary via `embed.FS`. This eliminates Node.js/npm dependencies, enables instant hot-reloading from local disk during development, and guarantees that OmniDex compiles cleanly across all architectures with a standard `go build`.

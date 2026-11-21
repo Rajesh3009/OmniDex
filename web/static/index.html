@@ -48,6 +48,9 @@
           title="View Live Application Logs & Crash History">
           📜 Logs
         </button>
+        <button id="btn-show-shortcuts" class="nav-pill" title="Keyboard Shortcuts (?)">
+          ⌨️ <span class="kbd-hint">?</span>
+        </button>
         <a href="/settings" id="btn-show-settings" class="nav-pill" style="text-decoration: none;">
           ⚙️ Settings
         </a>
@@ -68,6 +71,24 @@
         <a href="/api/v1/logs/crash-download" class="btn btn-sm" style="background: #ef4444; color: #fff; text-decoration: none; padding: 5px 12px; border-radius: 4px; font-weight: 500;">Download Crash Dump</a>
         <button id="btn-dismiss-crash-alert" style="background: transparent; border: 1px solid #f87171; color: #fecaca; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Dismiss</button>
       </div>
+    </div>
+
+    <!-- Collapsed Compact Stats Ticker -->
+    <div id="stats-ticker" class="stats-ticker" style="display: none;">
+      <div class="ticker-left">
+        <span class="ticker-pulse"></span>
+        <span class="ticker-label">OMNIDEX ENGINE ACTIVE</span>
+      </div>
+      <div class="ticker-items">
+        <span class="ticker-stat"><span class="ticker-icon">⚡</span> <strong id="ticker-torrents">0</strong> torrents (<span id="ticker-size">0 B</span>)</span>
+        <span class="ticker-dot">&bull;</span>
+        <span class="ticker-stat"><span class="ticker-icon">🌐</span> <strong id="ticker-dht-nodes">0</strong> DHT nodes</span>
+        <span class="ticker-dot">&bull;</span>
+        <span class="ticker-stat"><span class="ticker-icon">💾</span> RAM: <strong id="ticker-ram">0 MB</strong></span>
+        <span class="ticker-dot">&bull;</span>
+        <span class="ticker-stat"><span class="ticker-icon">⬇</span> <span id="ticker-dl">0 B/s</span> <span class="ticker-icon">⬆</span> <span id="ticker-ul">0 B/s</span></span>
+      </div>
+      <button id="btn-expand-ticker" class="btn-micro-ticker" title="Expand full metrics grid">📊 Expand ▾</button>
     </div>
 
     <!-- Top Metrics Overview -->
@@ -125,6 +146,7 @@
           <span class="search-icon">🔍</span>
           <input type="text" id="search-input" class="search-input"
             placeholder="Search across indexed titles, files, or enter 40-char info_hash..." autofocus>
+          <span class="kbd-input-hint" title="Press / to focus">/</span>
         </div>
         <button id="btn-search" class="btn btn-primary">Search</button>
       </div>
@@ -292,6 +314,10 @@
         </div>
 
         <div class="filter-actions">
+          <button id="btn-open-filter-drawer" class="btn btn-secondary btn-mobile-filter" title="Open Filter Options">
+            <span>⚙️ Filters</span>
+            <span id="mobile-filter-badge" class="badge-count" style="display: none;">0</span>
+          </button>
           <button id="btn-reset-filters" class="btn btn-ghost" title="Reset all filters and sorting">
             <span>↺</span> Reset Filters
           </button>
@@ -306,7 +332,15 @@
           <span class="results-count" id="results-count-text">Showing recent torrents</span>
           <div id="active-filter-badges" class="active-filter-badges"></div>
         </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="results-actions-bar">
+          <div class="view-mode-toggle" id="view-mode-toggle">
+            <button id="btn-view-table" class="view-btn active" title="Dense Table View (Press V to toggle)">
+              <span>☰ Table</span>
+            </button>
+            <button id="btn-view-cards" class="view-btn" title="Visual Cards View (Press V to toggle)">
+              <span>⊞ Cards</span>
+            </button>
+          </div>
           <button id="btn-refresh-page-swarm" class="btn btn-secondary btn-sm-action" style="padding: 4px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 5px;" title="Scrape live seeders and leechers via UDP trackers for all visible torrents">
             <span class="btn-refresh-icon">🔄</span> Refresh Page Swarm
           </button>
@@ -314,7 +348,10 @@
         </div>
       </div>
 
-      <div class="torrent-table-wrap">
+      <!-- Shimmer Skeleton Loading Wrap -->
+      <div id="skeleton-container" class="skeleton-wrap" style="display: none;"></div>
+
+      <div class="torrent-table-wrap" id="torrent-table-wrap">
         <table class="torrent-table">
           <thead>
             <tr>
@@ -362,10 +399,21 @@
             <!-- Dynamically populated rows -->
           </tbody>
         </table>
-        <div id="empty-state" class="empty-state" style="display: none;">
-          <div class="empty-state-icon">📂</div>
-          <h3>No torrents found</h3>
-          <p>Let the DHT crawler run, or trigger an external query with Prowlarr integration enabled.</p>
+      </div>
+
+      <!-- Visual Cards Grid View -->
+      <div id="torrents-cards" class="torrent-cards-grid" style="display: none;">
+        <!-- Dynamically populated cards -->
+      </div>
+
+      <!-- Empty State Recovery Box -->
+      <div id="empty-state" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">🔍</div>
+        <h3 id="empty-state-title">No matching torrents found</h3>
+        <p id="empty-state-desc">Try clearing active filters or searching Prowlarr external indexers.</p>
+        <div class="empty-state-actions" id="empty-state-actions">
+          <button id="btn-empty-clear-filters" class="btn btn-secondary btn-sm">↺ Clear Filters</button>
+          <button id="btn-empty-search-prowlarr" class="btn btn-primary btn-sm">📡 Query Prowlarr</button>
         </div>
       </div>
 
@@ -592,6 +640,16 @@
           <div class="code-box" id="detail-magnet"></div>
         </div>
 
+        <!-- Primary Media File Highlight -->
+        <div id="primary-media-banner" class="primary-media-banner" style="display: none;">
+          <div class="primary-media-icon">🎬</div>
+          <div class="primary-media-info">
+            <span class="primary-media-label">PRIMARY MEDIA FILE</span>
+            <span id="primary-media-filename" class="primary-media-title"></span>
+          </div>
+          <span id="primary-media-size" class="primary-media-size"></span>
+        </div>
+
         <!-- Files in Torrent Section -->
         <div class="form-group">
           <div class="files-header-bar">
@@ -754,6 +812,85 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.8rem; color: var(--text-dim);">
           <div>Showing <span id="log-count">0</span> entries · File: <code id="log-file-path-display">omnidex.log</code></div>
           <button class="btn btn-secondary btn-sm" data-close="modal-logs">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal-overlay" id="modal-shortcuts" style="z-index: 10005;">
+      <div class="modal-content" style="max-width: 580px; padding: 24px;">
+        <div class="modal-header" style="margin-bottom: 16px;">
+          <h2 style="display: flex; align-items: center; gap: 8px; font-size: 1.25rem;">⌨️ Keyboard Shortcuts</h2>
+          <button class="modal-close" data-close="modal-shortcuts">&times;</button>
+        </div>
+        <div class="shortcut-grid">
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Focus Search Input</span>
+            <kbd class="kbd-badge">/</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Select Next Release</span>
+            <div style="display: flex; gap: 4px;"><kbd class="kbd-badge">j</kbd> <kbd class="kbd-badge">↓</kbd></div>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Select Previous Release</span>
+            <div style="display: flex; gap: 4px;"><kbd class="kbd-badge">k</kbd> <kbd class="kbd-badge">↑</kbd></div>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Inspect Files &amp; Metadata</span>
+            <kbd class="kbd-badge">Enter</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Launch Magnet Link / Copy</span>
+            <kbd class="kbd-badge">m</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Quick Send to Client</span>
+            <kbd class="kbd-badge">q</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Scrape Live Peers (Swarm)</span>
+            <kbd class="kbd-badge">r</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Toggle Dense Table / Visual Cards</span>
+            <kbd class="kbd-badge">v</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Toggle Stats Bar Visibility</span>
+            <kbd class="kbd-badge">s</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Toggle Keyboard Shortcuts</span>
+            <kbd class="kbd-badge">?</kbd>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-desc">Close Modal / Clear Focus</span>
+            <kbd class="kbd-badge">Esc</kbd>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+          <button class="btn btn-secondary btn-sm" data-close="modal-shortcuts">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Filter Slide-Over Drawer Overlay -->
+    <div class="drawer-overlay" id="filter-drawer-overlay">
+      <div class="drawer-panel" id="filter-drawer-panel">
+        <div class="drawer-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.2rem;">⚙️</span>
+            <h3>Filters &amp; Sorting</h3>
+          </div>
+          <button class="drawer-close" id="btn-close-filter-drawer">&times;</button>
+        </div>
+        <div class="drawer-body" id="filter-drawer-body">
+          <!-- Secondary controls dynamically rendered or moved on small screens -->
+        </div>
+        <div class="drawer-footer">
+          <button id="btn-drawer-reset" class="btn btn-ghost" style="flex: 1;">Reset All</button>
+          <button id="btn-drawer-apply" class="btn btn-primary" style="flex: 1;">Done</button>
         </div>
       </div>
     </div>
