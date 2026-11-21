@@ -158,6 +158,53 @@ All compiled binaries will be output cleanly into the `dist/` directory.
   ./omnidex
   ```
 
+---
+
+## ⚡ Linux Service & Management CLI
+
+OmniDex features built-in CLI subcommands to replace manual `tmux` workflows with auto-restarting systemd user services, automated GitHub releases updating, and seamless folder migration:
+
+### 1. Systemd Background Service (`omnidex service`)
+Install OmniDex as a 24/7 background systemd user service with automated crash recovery (`Restart=always`) and user lingering:
+```bash
+# Install and start background service with 24/7 persistence across logouts
+./omnidex service install
+
+# Check service status, PID, and memory
+./omnidex service status
+
+# Tail real-time service journal logs
+./omnidex service logs -f
+
+# Standard lifecycle controls
+./omnidex service restart
+./omnidex service stop
+./omnidex service start
+./omnidex service uninstall
+```
+
+### 2. Auto-Update with Healthcheck Rollback (`omnidex update`)
+Check and apply new releases directly from GitHub with atomic binary replacement and automatic rollback if startup fails:
+```bash
+# Check if a new version is available on GitHub
+./omnidex update --check-only
+
+# Download matching OS/Arch asset, verify binary, swap in-place, and restart service
+./omnidex update
+```
+
+### 3. Safe Directory Migration (`omnidex migrate`)
+Relocate your database, configuration, and logs to another directory without SQLite corruption or manual systemd edits:
+```bash
+# Safely stops service, flushes WAL, moves files, updates systemd WorkingDirectory, and restarts
+./omnidex migrate --to /home/user/apps/omnidex
+
+# Copy data instead of moving (keeps source backup)
+./omnidex migrate --to /mnt/storage/omnidex --copy
+```
+
+---
+
 ### 2. Access Web Dashboard
 Open your browser at:
 [http://localhost:8686](http://localhost:8686)

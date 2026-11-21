@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"local-indexer/internal/cli"
 	"local-indexer/internal/config"
 	"local-indexer/internal/core"
 	"local-indexer/internal/db"
@@ -42,6 +43,10 @@ type Server struct {
 }
 
 func main() {
+	if handled := cli.HandleArgs(os.Args[1:], Version); handled {
+		return
+	}
+
 	cfgPath := "config.json"
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {

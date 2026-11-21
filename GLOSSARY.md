@@ -29,3 +29,17 @@ _Avoid_: Log cache, memory buffer, log queue
 **Log Sanitizer**:
 A security filter that automatically masks confidential tokens and API secrets from log records prior to persistence or display.
 _Avoid_: Redactor, credential scrubber
+
+## Process Supervision & Management CLI
+
+**Systemd Service Manager**:
+The daemon supervisor adapter module (`internal/cli.SystemdServiceManager`) that registers, configures, and controls user-level systemd units with automatic crash recovery (`Restart=always`) and session persistence across logouts.
+_Avoid_: Init script, process daemonizer, background supervisor
+
+**Self-Updater**:
+The automated binary release manager module (`internal/cli.Updater`) that queries GitHub releases, downloads matching OS/Arch assets, executes in-place binary swaps, and triggers healthchecked rollbacks if startup fails.
+_Avoid_: Auto-updater, binary puller, release downloader
+
+**Directory Migrator**:
+The data relocation module (`internal/cli.Migrator`) that safely stops active services, coordinates SQLite WAL checkpoints, moves database and configuration files, and updates systemd unit paths.
+_Avoid_: File mover, folder copier, path updater
