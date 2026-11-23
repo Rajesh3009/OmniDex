@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-11-23
+
+### Added
+- **Search & Discovery Dashboard UI/UX Overhaul (Zero-Build Vanilla Architecture - ADR-0003)**:
+  - **Dual-Mode Results Presentation**: Added persistent Layout Switcher toggle between Dense Table View and Visual Card View with category color-coded accent strips.
+  - **Power-User Interactivity & Keyboard Navigation**: Full keyboard traversal (`/` search focus, `j`/`k` or arrow traversal, `Enter` details, `m` magnet, `q` quick-send, `r` scrape, `v` view toggle, `s` stats toggle, `?` shortcut cheat sheet modal, `Esc` dismiss) with luminous active focus ring.
+  - **Live As-You-Type Search**: 250ms debounced instant search against SQLite FTS5 with background Prowlarr fallback.
+  - **Release Grouping Accordions**: Smart grouping collapses quality variants into clean expandable accordions in both table and visual card views.
+  - **Compact Stats Ticker**: Added single-line vital stats ticker (`#stats-ticker`) displaying indexing speed, node counts, and memory usage when full stats grid is collapsed.
+  - **Mobile Responsive Filter Drawer**: Slide-over filter panel on `< 768px` viewports with active filter counter badge.
+  - **File Inspector & Primary Media Banner**: File-type extension icons, in-modal file search filtering, and pinned primary media banner in details dialog.
+  - **Shimmer Skeletons & Empty State Recovery**: Shimmer loading placeholders and zero-match empty state recovery with one-click filter reset shortcuts.
+- **Service CLI & Lifecycle Management (`internal/cli`)**:
+  - `omnidex service install|start|stop|restart|status`: Non-root user systemd service management with auto-restart on crash.
+  - `omnidex update`: Safe self-updater with binary replacement and rollback.
+  - `omnidex migrate`: Fast cross-device directory migration tool for database and configurations.
+
 ## [1.3.8] - 2026-11-20
 
 ### Added & Refactored

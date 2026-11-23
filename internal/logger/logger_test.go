@@ -88,7 +88,7 @@ func TestCrashHandlerDetectionAndPruning(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	ch, err := SetupCrashHandler(tempDir, "1.3.8")
+	ch, err := SetupCrashHandler(tempDir, "1.3.9")
 	if err != nil {
 		t.Fatalf("failed to setup crash handler: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestLoggerIntegration(t *testing.T) {
 		LogToConsole: false,
 	}
 
-	l, err := Init(cfg, "1.3.8")
+	l, err := Init(cfg, "1.3.9")
 	if err != nil {
 		t.Fatalf("failed to init logger: %v", err)
 	}

@@ -53,7 +53,7 @@ func TestCLI_SubcommandDispatch(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	c := &CLI{
-		Version: "1.3.8",
+		Version: "1.3.9",
 		Runner:  runner,
 		Out:     &out,
 		ErrOut:  &errOut,
@@ -64,7 +64,7 @@ func TestCLI_SubcommandDispatch(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected code 0, got %d", code)
 	}
-	if !strings.Contains(out.String(), "v1.3.8") {
+	if !strings.Contains(out.String(), "v1.3.9") {
 		t.Errorf("expected version output, got: %s", out.String())
 	}
 
